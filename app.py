@@ -34,31 +34,34 @@ load_dotenv()
 # Streamlit'in markdown işleyicisindeki regex hatalarını önlemek için daha genel bir temizlik.
 def sanitize_markdown(text):
     """
-    Streamlit'in markdown işleyicisinde sorun çıkarabilecek belirli karakterleri temizler
-    veya kaçış karakteri ekler. Özellikle URL'lerde ve regex'lerde sorun yaratabilecek
-    karakterlere odaklanır.
+    Streamlit'in markdown işleyicisinde sorun çıkarabilecek tüm özel karakterleri kaçış
+    karakteriyle işaretler. Bu, metnin olduğu gibi gösterilmesini sağlar.
     """
-    # URL'lerdeki parantezleri ve diğer potansiyel sorunlu karakterleri temizlemeyi deneyelim
-    # Markdown linklerinde özel karakterler sorun yaratabilir.
-    # Burada `(?<foo>)` gibi desenleri değil, genel markdown ve URL güvenliğini hedefliyoruz.
+    # Karakterleri kaçış karakteriyle işaretleme
+    # Markdown özel karakterleri: \`*_{}[]()#+-.!
+    # Regex özel karakterleri: .^$*+?{}[]\|()
     
-    # Bazı özel karakterleri kaçış karakteriyle işaretle
-    # Streamlit'in kendi otolink işleyicisini bozmamak için URL linki formatı dışında olanları temizle
-    sanitized_text = text.replace(">", "&gt;").replace("<", "&lt;") # HTML etiketlerini önle
+    # Ortak sorunlu karakterler ve markdown özel karakterleri için genel kaçış
+    # İlk olarak, ters eğik çizgiyi kaçış karakteri olarak kendisini kaçıralım
+    sanitized_text = text.replace("\\", "\\\\")
     
-    # regex group specifier hatası için, genel olarak `(?<` ile başlayan her şeyi temizle
-    # Ancak bu, metindeki normal parantezleri de etkileyebilir.
-    # Eğer sorun hala devam ederse, bu satırı kaldırıp daha az invaziv bir çözüm düşünebiliriz.
-    sanitized_text = re.sub(r"\(\?<[^>]+>", "(", sanitized_text)
+    # Ardından diğer markdown/regex özel karakterlerini kaçış karakteriyle işaretle
+    # Sadece Streamlit'in oto-link işleyicisini bozmayacak şekilde özel karakterleri kaçırmalıyız.
+    # Özellikle parantezler, köşeli parantezler, yıldızlar, alt çizgiler, hash işaretleri,
+    # artılar, eksiler, noktalar ve ünlemler markdown'ı bozabilir.
+    special_chars = ['*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!']
+    for char in special_chars:
+        sanitized_text = sanitized_text.replace(char, f"\\{char}")
+
+    # < ve > karakterleri HTML olarak yorumlanmaması için özel olarak ele alınır.
+    sanitized_text = sanitized_text.replace("<", "&lt;").replace(">", "&gt;")
     
-    # Köşeli parantez içindeki link formatlarında sorun oluşmaması için
-    # özellikle [metin](link) veya sadece link olan durumlarda dikkatli olmalıyız.
-    # Genel olarak, URL'lerin doğru formatta olduğundan emin olmak önemlidir.
-    
-    # Ekstra kontrol: Eğer metin içinde gerçekten `(?<name>)` gibi bir yapı olmasını beklemiyorsak,
-    # bu regex hala uygun olabilir. Ancak bu, `SyntaxError`'ın doğrudan çözümü olmayabilir
-    # çünkü hata JS tarafında fırlatılıyor olabilir.
-    
+    # Eğer problem hala `(?<name>)` gibi bir desenden kaynaklanıyorsa,
+    # bu kısmı özellikle hedef almamız gerekebilir.
+    # Ancak genel kaçış bu sorunu da çözmelidir.
+    # Eğer sorun devam ederse, `re.sub(r"\(\?<[^>]+>", "(", sanitized_text)` satırı tekrar denenebilir
+    # ancak JS tarafında bu regex'in kendisi sorun yaratabilir. Şimdilik kaldırıyorum.
+
     return sanitized_text
 
 class Neo4jConnector:
