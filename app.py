@@ -589,61 +589,68 @@ def create_workflow():
     return graph
 
 # --- STREAMLIT UYGULAMASI ---
-st.set_page_config(page_title="İstanbul Mekan Asistanı 💬", page_icon="🌃")
+# ... (existing code remains the same) ...
 
-st.title("İstanbul Mekan Asistanı 💬")
-st.markdown("Merhaba! Ben İstanbul'daki romantik mekan, meyhane, restoran ve kafe önerileri sunan yapay zeka asistanıyım. Ayrıca hava durumu bilgisi veya ilginç bilgiler de sağlayabilirim. Size nasıl yardımcı olabilirim? 😊")
+# --- STREAMLIT UYGULAMASI ---
+# ... (existing setup code remains the same) ...
 
-# API Anahtarlarının ayarlı olup olmadığını kontrol et
-if not os.getenv("OPENAI_API_KEY") or not os.getenv("OPENWEATHER_API_KEY"):
-    st.error("⚠️ API anahtarları eksik! Lütfen `os.environ` içinde `OPENAI_API_KEY` ve `OPENWEATHER_API_KEY` değişkenlerini ayarlayın.")
-    st.stop() # Uygulamayı durdur
-
-# LangGraph'ı başlat (sadece bir kez)
-if "graph" not in st.session_state:
-    st.session_state.graph = create_workflow()
-if "conversation_thread_id" not in st.session_state:
-    # Generate a unique thread ID for a new conversation or retrieve an existing one
-    st.session_state.conversation_thread_id = str(uuid.uuid4()) # Use uuid for uniqueness
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# Display chat messages from history on app rerun
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# Kullanıcıdan girdi al (SADECE BURADA OLMALI)
+# Kullanıcıdan girdi al
 if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"):
+    # Önceki durumu yükle
+    config = {"configurable": {"thread_id": st.session_state.conversation_thread_id}}
+    current_state = st.session_state.graph.get_state(config)
+    
+    # Yeni kullanıcı mesajını ekle
+    new_message = HumanMessage(content=prompt)
+    if current_state:
+        # Var olan duruma yeni mesajı ekle
+        updated_messages = current_state.values["messages"] + [new_message]
+        inputs = {
+            "messages": updated_messages,
+            "last_recommended_place": current_state.values.get("last_recommended_place"),
+            "next_node": current_state.values.get("next_node"),
+            "location_query": current_state.values.get("location_query")
+        }
+    else:
+        # Yeni konuşma başlat
+        inputs = {"messages": [new_message]}
+    
     # Kullanıcı mesajını geçmişe ekle ve görüntüle
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     # LangGraph'ı çalıştırma ve yanıt üretme
-    inputs = {"messages": [HumanMessage(content=prompt)]}
-    
-    thread_id = st.session_state.conversation_thread_id
-    
     with st.spinner("Düşünüyorum... 🤔"):
         try:
-            latest_ai_content = "" 
-
-            for s in st.session_state.graph.stream(inputs, config={"configurable": {"thread_id": thread_id}}):
+            # Güncellenmiş durumla grafiği çalıştır
+            for s in st.session_state.graph.stream(
+                inputs, 
+                config={"configurable": {"thread_id": st.session_state.conversation_thread_id}}
+            ):
                 if "__end__" not in s:
                     ai_response_message = s.get("messages", [])[-1] if s.get("messages") else None
                     if ai_response_message and isinstance(ai_response_message, AIMessage):
-                        latest_ai_content = ai_response_message.content 
-                        
+                        latest_ai_content = ai_response_message.content
+            
+            # Son durumu al
+            final_state = st.session_state.graph.get_state(config)
+            if final_state:
+                # Konuşma kontekstini güncelle
+                st.session_state.conversation_context = {
+                    "last_recommended_place": final_state.values.get("last_recommended_place"),
+                    "location_query": final_state.values.get("location_query")
+                }
+            
             if latest_ai_content:
                 sanitized_final_ai_response = sanitize_markdown(latest_ai_content)
             else:
                 sanitized_final_ai_response = sanitize_markdown("Üzgünüm, bir yanıt üretemedim.")
 
+            # Yanıtı görüntüle ve sakla
             st.session_state.messages.append({"role": "assistant", "content": sanitized_final_ai_response})
             with st.chat_message("assistant"):
-                 st.markdown(safe_markdown(sanitized_final_ai_response))
+                st.markdown(safe_markdown(sanitized_final_ai_response))
 
         except Exception as e:
             error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin veya farklı bir soru sorun."
