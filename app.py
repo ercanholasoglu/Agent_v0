@@ -29,10 +29,10 @@ import os
 
 load_dotenv()
 
-# --- Markdown Sanitizasyon Fonksiyonu ---
+
 
 import re
-import unicodedata # Make sure this is imported if used elsewhere, or remove if not.
+import unicodedata
 
 def sanitize_markdown(text):
     """
@@ -43,27 +43,55 @@ def sanitize_markdown(text):
     if not isinstance(text, str):
         return str(text)
 
-    # Önemli: Ters eğik çizgiyi (backslash) diğer özel karakterlerden önce kaçışla
+    # 1. Backslashes'ı (ters eğik çizgi) ilk başta kaçışla
     # Çünkü diğer karakterleri kaçarken eklenen ters eğik çizgi,
     # kendisi de kaçış karakteri olarak algılanmamalıdır.
     sanitized_text = text.replace("\\", "\\\\")
 
-    # Markdown ve regex'te özel anlamı olan diğer karakterleri kaçışla.
+    # 2. Markdown ve potansiyel regex özel karakterlerini kaçışla.
     # Özellikle '?' ve '<' gibi karakterler regex grup belirleyicileriyle çakışabilir.
-    special_chars = [
+    # '|' da regex'te 'VEYA' anlamına gelir ve sorun çıkarabilir.
+    # '/' da URL'lerde kullanılır ve regex'te anlamı vardır.
+    # ':' de URL'lerde kullanılır ve regex'te anlamı olabilir.
+    # Bu karakterleri sadece tek başına değil, potansiyel olarak
+    # bir arada da düşünerek kaçmak önemlidir.
+    special_chars_for_regex_safety = [
         "`", "*", "_", "{", "}", "[", "]", "(", ")",
-        "#", "+", "-", ".", "!", "?", "<", ">", "|"
+        "#", "+", "-", ".", "!", "?", "<", ">", "|",
+        "&", # HTML entity before further processing
+        ":" # Often part of URLs or regex quantifiers
     ]
 
-    for char in special_chars:
-        # Sadece zaten kaçırılmış olmayan karakterleri kaçır.
-        # Bu basit replace, zaten '\\' ile başlayan bir şeye '`' eklemeyecek.
-        # Ancak, karmaşık durumlar için daha akıllıca bir regex gerekebilir.
-        # Şimdilik, bu düz ardışık replace işlemi yeterli olmalı.
-        sanitized_text = sanitized_text.replace(char, "\\" + char)
+    for char in special_chars_for_regex_safety:
+        # Bu yaklaşım, karakteri her gördüğünde kaçış ekler.
+        # Örneğin, "&" yerine "&amp;" kullanmak daha güvenli olabilir.
+        # Ancak, bu spesifik "Invalid regular expression" hatası için
+        # doğrudan Markdown kaçışları daha ilgili.
+        if char == "&":
+            sanitized_text = sanitized_text.replace(char, "&amp;")
+        elif char == "<":
+            sanitized_text = sanitized_text.replace(char, "&lt;")
+        elif char == ">":
+            sanitized_text = sanitized_text.replace(char, "&gt;")
+        else:
+            # Sadece zaten kaçırılmış olmayan karakterleri kaçır.
+            # Örneğin, eğer bir stringte zaten "\?" varsa, bunu "\\?" yapma.
+            # Ancak `replace` her zaman yeni bir string oluşturur, bu yüzden
+            # bu basit `replace` ardışık kullanımı bazen beklenmedik sonuçlara yol açabilir
+            # veya gereksiz çift kaçışlar oluşturabilir.
+            # Daha güvenli bir yaklaşım, `re.sub` ile sadece kaçırılmamış olanları bulup kaçmaktır.
+            # Ancak, bu hata genellikle basit karakter kombinasyonlarından kaynaklandığı için
+            # direkt replace denemesi yapalım.
+            sanitized_text = sanitized_text.replace(char, "\\" + char)
 
-    # HTML özel karakterleri için ek güvenlik önlemi (Markdown ile çakışmaz ama iyi bir uygulama)
-    sanitized_text = sanitized_text.replace("&", "&amp;")
+    # Son olarak, özellikle URL'leri ve potansiyel regex paternlerini tetikleyebilecek
+    # bazı kombinasyonları hedefleyelim.
+    # Örneğin, '(?<', '(?:' gibi gerçek regex yapılarına benzeyen şeyleri.
+    # Bu regexler, metinde zaten mevcut olan ve bir LLM tarafından üretilmiş olabilecek
+    # potansiyel hatalı kalıpları düzeltmeye odaklanır.
+    sanitized_text = re.sub(r'\(\?<', r'\\(\\?<', sanitized_text) # Handles (?<
+    sanitized_text = re.sub(r'\(\?:', r'\\(\\?:', sanitized_text) # Handles (?:
+    sanitized_text = re.sub(r'\(\?', r'\\(\\?', sanitized_text)   # Handles (?
 
     return sanitized_text
 
