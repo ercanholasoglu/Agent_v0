@@ -30,38 +30,43 @@ import os
 load_dotenv()
 
 # --- Markdown Sanitizasyon Fonksiyonu ---
+
+import re
+
 def sanitize_markdown(text):
     """
-    Streamlit'in markdown işleyicisinde sorun çıkarabilecek tüm özel karakterleri kaçış
-    karakteriyle işaretler. Bu, metnin olduğu gibi gösterilmesini sağlar.
+    Streamlit'in markdown işleyicisinde sorun çıkarabilecek özel karakterleri kaçış
+    karakteriyle işaretler ve potansiyel regex sorunlarını giderir.
     """
     if not isinstance(text, str):
         return str(text)
 
-    print(f"DEBUG: Sanitizing input: '{text[:100]}...'") # İlk 100 karakteri yazdır
-   
-    # Backslashes'ları ilk başta kaçış karakteriyle işaretle
-    sanitized_text = text.replace("\\", "\\\\") 
+    # Streamlit'in markdown işleyicisinde sorun yaratabilecek karakterleri
+    # markdown literal olarak göstermek için kaçış karakteriyle işaretle.
+    # Ters eğik çizgiyi ilk başta ve diğer tüm özel karakterlerden önce işle
+    # ki kendisi de yanlışlıkla kaçış karakteri olmasın.
     
-    # Diğer özel karakterleri kaçış karakteriyle işaretle
-    sanitized_text = sanitized_text.replace("`", "\\`") # Backticks için
-    sanitized_text = sanitized_text.replace("*", "\\*") # Kalın/italik için
-    sanitized_text = sanitized_text.replace("_", "\\_") # İtalik için
-    sanitized_text = sanitized_text.replace("{", "\\{").replace("}", "\\}") # Süslü parantezler
-    sanitized_text = sanitized_text.replace("[", "\\[").replace("]", "\\]") # Link/resim için köşeli parantezler
-    sanitized_text = sanitized_text.replace("(", "\\(").replace(")", "\\)") # Parantezler
-    sanitized_text = sanitized_text.replace("#", "\\#") # Başlıklar için
-    sanitized_text = sanitized_text.replace("+", "\\+") # Artı işareti
-    sanitized_text = sanitized_text.replace("-", "\\-") # Tire/çizgi (liste öğesi olabilir)
-    sanitized_text = sanitized_text.replace(".", "\\.") # Nokta (liste öğesi veya regex özel karakteri olabilir)
-    sanitized_text = sanitized_text.replace("!", "\\!") # Ünlem işareti (resimler için)
-    sanitized_text = sanitized_text.replace("?", "\\?") # Soru işareti
+    # Re-escaping characters that might be interpreted by markdown or regexes.
+    # Order matters: escape backslashes first, then other special chars.
+    sanitized_text = text.replace("\\", "\\\\") # Escape backslashes first
+    sanitized_text = sanitized_text.replace("`", "\\`")
+    sanitized_text = sanitized_text.replace("*", "\\*")
+    sanitized_text = sanitized_text.replace("_", "\\_")
+    sanitized_text = sanitized_text.replace("{", "\\{").replace("}", "\\}")
+    sanitized_text = sanitized_text.replace("[", "\\[").replace("]", "\\]")
+    sanitized_text = sanitized_text.replace("(", "\\(").replace(")", "\\)")
+    sanitized_text = sanitized_text.replace("#", "\\#")
+    sanitized_text = sanitized_text.replace("+", "\\+")
+    sanitized_text = sanitized_text.replace("-", "\\-") # Potansiyel liste öğesi veya HTML/XML kapanış tagı
+    sanitized_text = sanitized_text.replace(".", "\\.") # Regex özel karakteri
+    sanitized_text = sanitized_text.replace("!", "\\!") # Resimler için
+    sanitized_text = sanitized_text.replace("?", "\\?") # Regex özel karakteri
 
-    # Açılı parantezleri HTML varlıklarına dönüştür
+    # Bazı özel HTML/XML karakterlerini dönüştürmek, genellikle markdown ile çakışmaz ama güvende olmak için
     sanitized_text = sanitized_text.replace("<", "&lt;").replace(">", "&gt;")
+    sanitized_text = sanitized_text.replace("&", "&amp;") # HTML varlıklarını da kaçışla
 
     return sanitized_text
-
 # --- Neo4j Bağlantı Sınıfı (DOĞRU YERİNDE) ---
 class Neo4jConnector:
     def __init__(self):
