@@ -40,7 +40,6 @@ def sanitize_markdown(text):
 
     print(f"DEBUG: Sanitizing input: '{text[:100]}...'") # İlk 100 karakteri yazdır
    
-
     # Backslashes'ları ilk başta kaçış karakteriyle işaretle
     sanitized_text = text.replace("\\", "\\\\") 
     
@@ -63,7 +62,8 @@ def sanitize_markdown(text):
 
     return sanitized_text
 
-
+# --- Neo4j Bağlantı Sınıfı (DOĞRU YERİNDE) ---
+class Neo4jConnector:
     def __init__(self):
         self.uri = os.getenv("NEO4J_URI")
         self.user = os.getenv("NEO4J_USER")
@@ -169,7 +169,7 @@ def process_documents(docs: List[Any]) -> List[Document]:
                 "Fiyat Seviyesi": str(doc.get("price_level", "Yok"))
             }
             main_content = (
-                f"Mekan Adı: {metadata['Mekan Adı']}, "
+                f"Mekan Adı: {metadata['Mekan Adanı']}, "
                 f"Adres: {metadata['Adres']}, "
                 f"Google Puanı: {metadata['Google Puanı']}, "
                 f"Google Yorum Sayısı: {metadata['Google Yorum Sayısı']}, "
@@ -596,8 +596,8 @@ if prompt := st.chat_input("Mesajınızı buraya yazın..."):
     # LangGraph'ı çalıştırma
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
-        full_response = ""
-        
+        full_response_content = "" # Use a distinct variable name
+
         # Sadece son kullanıcı mesajını gönder
         initial_state = {
             "messages": [HumanMessage(content=prompt)],
@@ -610,35 +610,39 @@ if prompt := st.chat_input("Mesajınızı buraya yazın..."):
             graph_config = {"configurable": {"thread_id": st.session_state.conversation_thread_id}}
             
             # LangGraph stream metodunu kullanarak yanıtı parça parça alın
+            # Loop through the stream to get updates
             for s in st.session_state.graph.stream(initial_state, config=graph_config):
-                for key in s:
-                    node_output = s[key]
-                    if "messages" in node_output:
-                        # Find the last AIMessage content from the node_output
-                        ai_message_content = None
-                        for msg in reversed(node_output["messages"]): 
-                            if isinstance(msg, AIMessage) and msg.content:
-                                ai_message_content = msg.content
-                                break
-                        
-                        if ai_message_content:
-                            # Stream the sanitized content
-                            for chunk in ai_message_content.split(): 
-                                full_response += chunk + " "
-                                time.sleep(0.02) 
-                                message_placeholder.markdown(sanitize_markdown(full_response) + "▌") 
+                # 's' is a dictionary where keys are node names and values are the state updates from that node
+                # We need to find the latest AIMessage from the updated state
+                if "messages" in s:
+                    # 's["messages"]' would contain the *difference* in messages for that step.
+                    # To get the cumulative messages, we'd typically need to access the full state.
+                    # For streaming display, we're interested in new AI messages being generated.
+                    for key, value in s.items(): # Iterate through each node's output in the step
+                        if "messages" in value: # Check if this node updated messages
+                            # Find the latest AI message in the current node's message list
+                            for msg in reversed(value["messages"]):
+                                if isinstance(msg, AIMessage):
+                                    full_response_content = msg.content
+                                    # Stream the content to the placeholder
+                                    temp_stream_display = ""
+                                    for chunk in full_response_content.split():
+                                        temp_stream_display += chunk + " "
+                                        time.sleep(0.02) # Small delay for streaming effect
+                                        message_placeholder.markdown(sanitize_markdown(temp_stream_display) + "▌")
+                                    
+                                    # Once the full AI message for the step is displayed, update the final placeholder
+                                    message_placeholder.markdown(sanitize_markdown(full_response_content))
+                                    # Append the *final* AI message of this step to session state messages
+                                    st.session_state.messages.append({"role": "assistant", "content": full_response_content})
+                                    break # Only care about the last AI message from this node's output
+                            if full_response_content: # If an AI message was found and processed
+                                break # Exit the inner loop, as we've handled this step's main message
+                if full_response_content: # If a full response was streamed for this turn
+                    break # Exit the outer streaming loop
 
-                            # Display and save the final sanitized response
-                            final_sanitized_response = sanitize_markdown(ai_message_content)
-                            message_placeholder.markdown(final_sanitized_response) 
-                            st.session_state.messages.append({"role": "assistant", "content": ai_message_content}) 
-                            break # Break after processing the first AI message
-
-                if full_response:
-                    break # Break outer loop if response is already generated
-
-            # If no AI message was found after streaming (e.g., if the graph leads to END without an AIMessage)
-            if not full_response: 
+            # Fallback if no AI message was generated by the graph execution (e.g., if it hit END without sending a message)
+            if not full_response_content: 
                 fallback_message = "Üzgünüm, isteğinizi anlayamadım veya şu an yanıt veremiyorum. Daha spesifik bir şey mi denemek istersiniz?"
                 sanitized_fallback_message = sanitize_markdown(fallback_message) 
                 message_placeholder.markdown(sanitized_fallback_message)
