@@ -30,7 +30,7 @@ import os
 load_dotenv()
 
 
-
+import uuid
 import re
 import unicodedata
 
@@ -608,9 +608,7 @@ if not os.getenv("OPENAI_API_KEY") or not os.getenv("OPENWEATHER_API_KEY"):
 if "graph" not in st.session_state:
     st.session_state.graph = create_workflow()
 if "conversation_thread_id" not in st.session_state:
-    # Generate a unique thread ID for a new conversation or retrieve an existing one
-    # This could be based on a user ID, session ID, or a new UUID for each session
-    st.session_state.conversation_thread_id = str(random.uuid4()) # Use uuid for uniqueness
+    st.session_state.conversation_thread_id = str(uuid.uuid4()) 
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
