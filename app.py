@@ -608,75 +608,61 @@ if not os.getenv("OPENAI_API_KEY") or not os.getenv("OPENWEATHER_API_KEY"):
 if "graph" not in st.session_state:
     st.session_state.graph = create_workflow()
 if "conversation_thread_id" not in st.session_state:
-    st.session_state.conversation_thread_id = "user_session_streamlit_" + str(random.randint(1000, 9999))
+    # Generate a unique thread ID for a new conversation or retrieve an existing one
+    # This could be based on a user ID, session ID, or a new UUID for each session
+    st.session_state.conversation_thread_id = str(random.uuid4()) # Use uuid for uniqueness
+
 if "messages" not in st.session_state:
-    st.session_state.messages = [{"role": "assistant", "content": "Merhaba! 👋 İstanbul'da mekan, hava durumu veya eğlenceli bir bilgi arıyorsan buradayım!"}]
+    st.session_state.messages = []
 
+# Display chat messages from history on app rerun
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-# Sohbet geçmişini görüntüle
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(sanitize_markdown(message["content"]))
-
-
-# Kullanıcıdan girdi al
-if prompt := st.chat_input("Mesajınızı buraya yazın..."):
+# Kullanıcıdan girdi al (SADECE BURADA OLMALI)
+if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"): # Added a unique key
     # Kullanıcı mesajını geçmişe ekle ve görüntüle
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # LangGraph'ı çalıştırma
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        full_response_content = "" # Use a distinct variable name
-        
-        # Sadece son kullanıcı mesajını gönder
-        initial_state = {
-            "messages": [HumanMessage(content=prompt)],
-            "last_recommended_place": None,
-            "next_node": None
-        }
-# Kullanıcıdan girdi al
-if prompt := st.chat_input("Mesajınızı buraya yazın..."):
-    # Kullanıcı mesajını geçmişe ekle ve görüntüle
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    # LangGraph'ı çalıştırma
-    with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        full_response = ""
-
-        # LangGraph stream metodunu kullanarak yanıtı parça parça alın
+    # LangGraph'ı çalıştırma ve yanıt üretme
+    inputs = {"messages": [HumanMessage(content=prompt)]}
+    
+    # Check if there's an existing conversation thread for this session
+    # If not, initialize a new one. This ensures continuity.
+    thread_id = st.session_state.conversation_thread_id
+    
+    # Use the graph to invoke the agent
+    with st.spinner("Düşünüyorum... 🤔"):
         try:
-            graph_config = {"configurable": {"thread_id": st.session_state.conversation_thread_id}}
+            # Invoking with a config that includes the thread_id for state management
+            for s in st.session_state.graph.stream(inputs, config={"configurable": {"thread_id": thread_id}}):
+                # Streamlit doesn't natively support streaming updates to markdown in chat
+                # So we'll accumulate the full response for now
+                if "__end__" not in s:
+                    # The state update for messages is cumulative. We want the new AIMessage.
+                    # This assumes the last message in the `messages` list is the one added by the AI.
+                    # Adjust if your graph adds messages differently.
+                    ai_response_message = s.get("messages", [])[-1] if s.get("messages") else None
+                    if ai_response_message and isinstance(ai_response_message, AIMessage):
+                        # Accumulate parts if streaming, or just take the final content if not
+                        latest_ai_content = ai_response_message.content
+                        
+            # After the loop, the last `latest_ai_content` should be the full response
+            final_ai_response_content = latest_ai_content if 'latest_ai_content' in locals() else "Üzgünüm, bir yanıt üretemedim."
+            
+            # Sanitize the final content before displaying and saving
+            sanitized_final_ai_response = sanitize_markdown(final_ai_response_content)
 
-            # LangGraph stream metodunu kullanarak yanıtı parça parça alın
-            for s in st.session_state.graph.stream(initial_state, config=graph_config):
-                for key in s:
-                    node_output = s[key]
-                    if "messages" in node_output:
-                        for msg in reversed(node_output["messages"]):
-                            if isinstance(msg, AIMessage) and msg.content:
-                                # AI mesajını sanitize ederek göster
-                                full_response = msg.content
-                                message_placeholder.markdown(sanitize_markdown(full_response))
-                                # Session state'e ekle
-                                st.session_state.messages.append({"role": "assistant", "content": full_response})
-                                break
-                        if full_response:
-                            break
-                if full_response:
-                    break
-
-            if not full_response:
-                fallback = "Anlayamadım, lütfen başka bir soru deneyin."
-                message_placeholder.markdown(sanitize_markdown(fallback))
-                st.session_state.messages.append({"role": "assistant", "content": fallback})
+            st.session_state.messages.append({"role": "assistant", "content": sanitized_final_ai_response})
+            with st.chat_message("assistant"):
+                st.markdown(sanitized_final_ai_response)
 
         except Exception as e:
-            error = f"Hata: {str(e)}"
-            message_placeholder.markdown(sanitize_markdown(error))
-            st.session_state.messages.append({"role": "assistant", "content": error})
+            error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin veya farklı bir soru sorun."
+            sanitized_error_message = sanitize_markdown(error_message)
+            st.session_state.messages.append({"role": "assistant", "content": sanitized_error_message})
+            with st.chat_message("assistant"):
+                st.markdown(sanitized_error_message)
