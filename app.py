@@ -30,77 +30,43 @@ import uuid
 
 load_dotenv()
 
-
-import re
-
-import re
-import unicodedata
-
+# --- REVISED sanitize_markdown FUNCTION ---
 def sanitize_markdown(text):
     """
-    Streamlit's Markdown renderer'ında sorun çıkarabilecek özel karakterleri
-    güvenli bir şekilde kaçış karakteriyle işaretler.
-    Invalid regular expression hatalarını önlemek için tasarlanmıştır.
+    Streamlit's Markdown renderer'ında 'Invalid regular expression' hatalarını önlemek için
+    özel karakterleri güvenli bir şekilde kaçış karakteriyle işaretler.
     """
     if not isinstance(text, str):
         return str(text)
 
-    # 1. HTML varlıklarını kaçır (önce)
-    # Bu, < ve > gibi karakterlerin HTML tag'i olarak algılanmasını engeller
-    # ve daha sonra regex özel karakteri olarak kaçırılmasını kolaylaştırır.
-    sanitized_text = text.replace("&", "&amp;")
+    sanitized_text = text
+
+    # 1. HTML özel karakterlerini kaçır (Her zaman ilk yapılmalı)
+    sanitized_text = sanitized_text.replace("&", "&amp;")
     sanitized_text = sanitized_text.replace("<", "&lt;")
     sanitized_text = sanitized_text.replace(">", "&gt;")
 
-    # 2. Backslashes'ı (ters eğik çizgi) ilk başta kaçışla
-    # Çünkü diğer karakterleri kaçarken eklenen ters eğik çizgi,
-    # kendisi de kaçış karakteri olarak algılanmamalıdır.
-    # HTML varlıklarından sonra yapılmalı ki "&amp;" gibi şeyler etkilenmesin.
+    # 2. Backslashes'ı (ters eğik çizgi) kaçışla (Diğer kaçışlardan önce yapılmalı)
     sanitized_text = sanitized_text.replace("\\", "\\\\")
 
-    # 3. Tüm potansiyel regex özel karakterlerini kaçışla
-    # Bu set, yaygın tüm regex metakarakterlerini içerir.
-    # r"([{}()\[\].,*+?|^$])" bu deseni kullanmak,
-    # listedeki her bir karaktere tek tek bakmaktan daha verimlidir.
-    # Unutmayın, `re.escape` bir dizeyi *regex deseni olarak kullanmak* için kaçar.
-    # Burada ise dizeyi *düz metin olarak göstermek* için kaçıyoruz, bu yüzden
-    # manuel kaçış veya özel `re.sub` daha uygun.
+    # 3. Özellikle 'Invalid group specifier name' hatasına neden olan regex desenlerini kaçır.
+    # Bu hata genellikle `(?<name>`, `(?:`, `(?=` gibi regex grup belirteçleri düz metin olarak geldiğinde oluşur.
+    # `\(` ve `\?` kombinasyonlarını hedefliyoruz.
+    sanitized_text = re.sub(r'\(\?', r'\\(\?', sanitized_text) # Converts `(` followed by `?` to `\(` `\?`
 
-    # Regex metakarakterleri: . ^ $ * + ? { } [ ] \ | ( )
-    # Ek olarak, Markdown'da özel anlamı olan ve karışıklığa yol açabilecekler: ` -
-    # Ve URL'lerde sıkça kullanılan ve regex'te de yeri olan: : /
-    
-    # Not: re.escape zaten bu karakterlerin çoğunu kaçırır, ancak bazı durumlarda
-    # manuel kontrol daha iyidir. Ancak burada, doğrudan hedefliyoruz.
-    
-    # Problem genellikle '(', '?' gibi karakterlerin ardışık gelmesinden kaynaklanıyor.
-    # Örneğin: (?<name>)
-    
-    # Belirli regex grup belirleyicilerini hedefleyen özel durumlar
-    # (Bu kısım, önceki versiyonda olduğu gibi kalabilir, çünkü direkt olarak hedefliyor)
-    sanitized_text = re.sub(r'\\(\?<', r'\\\\(\?<', sanitized_text) # Zaten kaçırılmış `\(`'den sonra gelen `?`
-    sanitized_text = re.sub(r'\\(\?:', r'\\\\(\\?:', sanitized_text)
-    sanitized_text = re.sub(r'\\(\?', r'\\\\(\\?', sanitized_text)
+    # 4. Kalan yaygın Markdown ve Regex özel karakterlerini kaçır.
+    # Bu regex deseni, yukarıdaki işlemlerden sonra kalan ve hala sorun yaratabilecek karakterleri kapsar.
+    # `*`, `_`, `[`, `]`, `(`, `)`, `#`, `+`, `-`, `.`, `!`, `|`, `^`, `$`, `/`, `:`
+    # `re.escape` would do most of this, but manual approach gives more control after prior replacements.
+    markdown_and_regex_chars_pattern = re.compile(r"([*_{}\[\]()#+-.!|^$/:])")
+    sanitized_text = markdown_and_regex_chars_pattern.sub(r"\\\1", sanitized_text)
 
-    # Genel regex özel karakterlerini kaçır
-    # Önemli: Bu regex, `re.sub` ile tüm bu karakterlerin önüne bir backslash ekler.
-    # HTML varlıkları ve `\\` için yapılan kaçışlardan SONRA çalışmalı.
-    
-    # Karakter setinin dışına çıkarılanlar:
-    # - `&`, `<`, `>`: Bunlar zaten HTML varlıklarına dönüştürüldü.
-    # - `\`: Zaten `\\` olarak kaçırıldı.
-    # Bunların dışındaki tüm regex özel karakterlerini ele alıyoruz.
-    regex_special_chars_pattern = re.compile(r"([{}()[\]*+?|^$/])")
-    sanitized_text = regex_special_chars_pattern.sub(r"\\\1", sanitized_text)
-
-    # Normalize unicode characters to handle various forms of accents, etc. (NFKD)
-    # Then encode to ASCII and decode, effectively removing non-ASCII characters
-    # that might cause rendering issues (e.g. smart quotes, em-dashes).
+    # 5. Unicode normalizasyonu (Ek güvenlik için)
     sanitized_text = unicodedata.normalize('NFKD', sanitized_text).encode('ascii', 'ignore').decode('utf-8')
 
     return sanitized_text
 
-# --- Neo4j Bağlantı Sınıfı (DOĞRU YERİNDE) ---
+# --- Neo4j Bağlantı Sınıfı ---
 class Neo4jConnector:
     def __init__(self):
         self.uri = os.getenv("NEO4J_URI")
@@ -207,7 +173,7 @@ def process_documents(docs: List[Any]) -> List[Document]:
                 "Fiyat Seviyesi": str(doc.get("price_level", "Yok"))
             }
             main_content = (
-                f"Mekan Adı: {metadata['Mekan Adı']}, " # CORRECTED: Changed 'Mekan Adanı' to 'Mekan Adı'
+                f"Mekan Adı: {metadata['Mekan Adı']}, "
                 f"Adres: {metadata['Adres']}, "
                 f"Google Puanı: {metadata['Google Puanı']}, "
                 f"Google Yorum Sayısı: {metadata['Google Yorum Sayısı']}, "
@@ -614,7 +580,6 @@ if "graph" not in st.session_state:
     st.session_state.graph = create_workflow()
 if "conversation_thread_id" not in st.session_state:
     # Generate a unique thread ID for a new conversation or retrieve an existing one
-    # This could be based on a user ID, session ID, or a new UUID for each session
     st.session_state.conversation_thread_id = str(uuid.uuid4()) # Use uuid for uniqueness
 
 if "messages" not in st.session_state:
@@ -626,7 +591,7 @@ for msg in st.session_state.messages:
         st.markdown(msg["content"])
 
 # Kullanıcıdan girdi al (SADECE BURADA OLMALI)
-if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"): # Added a unique key
+if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"):
     # Kullanıcı mesajını geçmişe ekle ve görüntüle
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -635,27 +600,18 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
     # LangGraph'ı çalıştırma ve yanıt üretme
     inputs = {"messages": [HumanMessage(content=prompt)]}
     
-    # Check if there's an existing conversation thread for this session
-    # If not, initialize a new one. This ensures continuity.
     thread_id = st.session_state.conversation_thread_id
     
-    # Use the graph to invoke the agent
     with st.spinner("Düşünüyorum... 🤔"):
         try:
-            # Invoking with a config that includes the thread_id for state management
-            # Initialize latest_ai_content to a default empty string
             latest_ai_content = "" 
 
             for s in st.session_state.graph.stream(inputs, config={"configurable": {"thread_id": thread_id}}):
                 if "__end__" not in s:
                     ai_response_message = s.get("messages", [])[-1] if s.get("messages") else None
                     if ai_response_message and isinstance(ai_response_message, AIMessage):
-                        # Accumulate parts if streaming, or just take the final content if not
-                        # This assumes the stream yields the full message at the end of its processing for a node
                         latest_ai_content = ai_response_message.content 
                         
-            # After the loop, `latest_ai_content` will hold the complete AI response from the graph.
-            # Now, sanitize and display it.
             if latest_ai_content:
                 sanitized_final_ai_response = sanitize_markdown(latest_ai_content)
             else:
@@ -663,12 +619,11 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
             st.session_state.messages.append({"role": "assistant", "content": sanitized_final_ai_response})
             with st.chat_message("assistant"):
-                st.markdown(sanitized_final_ai_response)
+                st.markdown(sanitized_final_ai_response) # Corrected line to display the already sanitized response
 
         except Exception as e:
-
             error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin veya farklı bir soru sorun."
-            sanitized_error_message = sanitize_markdown(error_message) # Make sure this is called
+            sanitized_error_message = sanitize_markdown(error_message)
             st.session_state.messages.append({"role": "assistant", "content": sanitized_error_message})
             with st.chat_message("assistant"):
                 st.markdown(sanitized_error_message)
