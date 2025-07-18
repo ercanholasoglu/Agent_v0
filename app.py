@@ -32,71 +32,34 @@ load_dotenv()
 
 
 import re
-import unicodedata
 
 def sanitize_markdown(text):
-    """
-    Streamlit's Markdown renderer'ında sorun çıkarabilecek özel karakterleri
-    güvenli bir şekilde kaçış karakteriyle işaretler.
-    Invalid regular expression hatalarını önlemek için tasarlanmıştır.
-    """
     if not isinstance(text, str):
         return str(text)
 
-    # 1. HTML varlıklarını kaçır (önce)
-    # Bu, < ve > gibi karakterlerin HTML tag'i olarak algılanmasını engeller
-    # ve daha sonra regex özel karakteri olarak kaçırılmasını kolaylaştırır.
-    sanitized_text = text.replace("&", "&amp;")
-    sanitized_text = sanitized_text.replace("<", "&lt;")
-    sanitized_text = sanitized_text.replace(">", "&gt;")
+    # Ters slash temizliği ilk yapılmalı
+    text = text.replace("\\", "\\\\")
 
-    # 2. Backslashes'ı (ters eğik çizgi) ilk başta kaçışla
-    # Çünkü diğer karakterleri kaçarken eklenen ters eğik çizgi,
-    # kendisi de kaçış karakteri olarak algılanmamalıdır.
-    # HTML varlıklarından sonra yapılmalı ki "&amp;" gibi şeyler etkilenmesin.
-    sanitized_text = sanitized_text.replace("\\", "\\\\")
+    # Markdown özel karakterleri
+    markdown_chars = ['`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!', '?']
+    for char in markdown_chars:
+        text = text.replace(char, f"\\{char}")
 
-    # 3. Tüm potansiyel regex özel karakterlerini kaçışla
-    # Bu set, yaygın tüm regex metakarakterlerini içerir.
-    # r"([{}()\[\].,*+?|^$])" bu deseni kullanmak,
-    # listedeki her bir karaktere tek tek bakmaktan daha verimlidir.
-    # Unutmayın, `re.escape` bir dizeyi *regex deseni olarak kullanmak* için kaçar.
-    # Burada ise dizeyi *düz metin olarak göstermek* için kaçıyoruz, bu yüzden
-    # manuel kaçış veya özel `re.sub` daha uygun.
+    # Regex özel karakterleri
+    regex_chars = ['?', ':', '<', '>']
+    for char in regex_chars:
+        text = text.replace(char, f"\\{char}")
 
-    # Regex metakarakterleri: . ^ $ * + ? { } [ ] \ | ( )
-    # Ek olarak, Markdown'da özel anlamı olan ve karışıklığa yol açabilecekler: ` -
-    # Ve URL'lerde sıkça kullanılan ve regex'te de yeri olan: : /
-    
-    # Not: re.escape zaten bu karakterlerin çoğunu kaçırır, ancak bazı durumlarda
-    # manuel kontrol daha iyidir. Ancak burada, doğrudan hedefliyoruz.
-    
-    # Problem genellikle '(', '?' gibi karakterlerin ardışık gelmesinden kaynaklanıyor.
-    # Örneğin: (?<name>)
-    
-    # Belirli regex grup belirleyicilerini hedefleyen özel durumlar
-    # (Bu kısım, önceki versiyonda olduğu gibi kalabilir, çünkü direkt olarak hedefliyor)
-    sanitized_text = re.sub(r'\\(\?<', r'\\\\(\?<', sanitized_text) # Zaten kaçırılmış `\(`'den sonra gelen `?`
-    sanitized_text = re.sub(r'\\(\?:', r'\\\\(\\?:', sanitized_text)
-    sanitized_text = re.sub(r'\\(\?', r'\\\\(\\?', sanitized_text)
+    # HTML özel karakterleri
+    text = text.replace("<", "<").replace(">", ">")
 
-    # Genel regex özel karakterlerini kaçır
-    # Önemli: Bu regex, `re.sub` ile tüm bu karakterlerin önüne bir backslash ekler.
-    # HTML varlıkları ve `\\` için yapılan kaçışlardan SONRA çalışmalı.
-    
-    # Karakter setinin dışına çıkarılanlar:
-    # - `&`, `<`, `>`: Bunlar zaten HTML varlıklarına dönüştürüldü.
-    # - `\`: Zaten `\\` olarak kaçırıldı.
-    # Bunların dışındaki tüm regex özel karakterlerini ele alıyoruz.
-    regex_special_chars_pattern = re.compile(r"([{}()[\]*+?|^$/])")
-    sanitized_text = regex_special_chars_pattern.sub(r"\\\1", sanitized_text)
+    # Regex grup tanımlarını temizle
+    text = re.sub(r'$\?<\w+>', '(?:', text)  # isimli grup
+    text = re.sub(r'$\?:', '(', text)        # non-capturing grup
+    text = re.sub(r'$\?', '(', text)         # eksik regex karakteri
 
-    # Normalize unicode characters to handle various forms of accents, etc. (NFKD)
-    # Then encode to ASCII and decode, effectively removing non-ASCII characters
-    # that might cause rendering issues (e.g. smart quotes, em-dashes).
-    sanitized_text = unicodedata.normalize('NFKD', sanitized_text).encode('ascii', 'ignore').decode('utf-8')
+    return text
 
-    return sanitized_text
 
 # --- Neo4j Bağlantı Sınıfı (DOĞRU YERİNDE) ---
 class Neo4jConnector:
@@ -661,7 +624,8 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
             st.session_state.messages.append({"role": "assistant", "content": sanitized_final_ai_response})
             with st.chat_message("assistant"):
-                st.markdown(sanitized_final_ai_response)
+                response = get_ai_response()
+                st.markdown(sanitize_markdown(response))
 
         except Exception as e:
 
