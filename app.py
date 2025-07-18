@@ -32,41 +32,41 @@ load_dotenv()
 # --- Markdown Sanitizasyon Fonksiyonu ---
 
 import re
+import unicodedata # Make sure this is imported if used elsewhere, or remove if not.
 
 def sanitize_markdown(text):
     """
-    Streamlit'in markdown işleyicisinde sorun çıkarabilecek özel karakterleri kaçış
-    karakteriyle işaretler ve potansiyel regex sorunlarını giderir.
+    Streamlit's Markdown renderer'ında sorun çıkarabilecek özel karakterleri
+    güvenli bir şekilde kaçış karakteriyle işaretler.
+    Invalid regular expression hatalarını önlemek için tasarlanmıştır.
     """
     if not isinstance(text, str):
         return str(text)
 
-    # Streamlit'in markdown işleyicisinde sorun yaratabilecek karakterleri
-    # markdown literal olarak göstermek için kaçış karakteriyle işaretle.
-    # Ters eğik çizgiyi ilk başta ve diğer tüm özel karakterlerden önce işle
-    # ki kendisi de yanlışlıkla kaçış karakteri olmasın.
-    
-    # Re-escaping characters that might be interpreted by markdown or regexes.
-    # Order matters: escape backslashes first, then other special chars.
-    sanitized_text = text.replace("\\", "\\\\") # Escape backslashes first
-    sanitized_text = sanitized_text.replace("`", "\\`")
-    sanitized_text = sanitized_text.replace("*", "\\*")
-    sanitized_text = sanitized_text.replace("_", "\\_")
-    sanitized_text = sanitized_text.replace("{", "\\{").replace("}", "\\}")
-    sanitized_text = sanitized_text.replace("[", "\\[").replace("]", "\\]")
-    sanitized_text = sanitized_text.replace("(", "\\(").replace(")", "\\)")
-    sanitized_text = sanitized_text.replace("#", "\\#")
-    sanitized_text = sanitized_text.replace("+", "\\+")
-    sanitized_text = sanitized_text.replace("-", "\\-") # Potansiyel liste öğesi veya HTML/XML kapanış tagı
-    sanitized_text = sanitized_text.replace(".", "\\.") # Regex özel karakteri
-    sanitized_text = sanitized_text.replace("!", "\\!") # Resimler için
-    sanitized_text = sanitized_text.replace("?", "\\?") # Regex özel karakteri
+    # Önemli: Ters eğik çizgiyi (backslash) diğer özel karakterlerden önce kaçışla
+    # Çünkü diğer karakterleri kaçarken eklenen ters eğik çizgi,
+    # kendisi de kaçış karakteri olarak algılanmamalıdır.
+    sanitized_text = text.replace("\\", "\\\\")
 
-    # Bazı özel HTML/XML karakterlerini dönüştürmek, genellikle markdown ile çakışmaz ama güvende olmak için
-    sanitized_text = sanitized_text.replace("<", "&lt;").replace(">", "&gt;")
-    sanitized_text = sanitized_text.replace("&", "&amp;") # HTML varlıklarını da kaçışla
+    # Markdown ve regex'te özel anlamı olan diğer karakterleri kaçışla.
+    # Özellikle '?' ve '<' gibi karakterler regex grup belirleyicileriyle çakışabilir.
+    special_chars = [
+        "`", "*", "_", "{", "}", "[", "]", "(", ")",
+        "#", "+", "-", ".", "!", "?", "<", ">", "|"
+    ]
+
+    for char in special_chars:
+        # Sadece zaten kaçırılmış olmayan karakterleri kaçır.
+        # Bu basit replace, zaten '\\' ile başlayan bir şeye '`' eklemeyecek.
+        # Ancak, karmaşık durumlar için daha akıllıca bir regex gerekebilir.
+        # Şimdilik, bu düz ardışık replace işlemi yeterli olmalı.
+        sanitized_text = sanitized_text.replace(char, "\\" + char)
+
+    # HTML özel karakterleri için ek güvenlik önlemi (Markdown ile çakışmaz ama iyi bir uygulama)
+    sanitized_text = sanitized_text.replace("&", "&amp;")
 
     return sanitized_text
+
 # --- Neo4j Bağlantı Sınıfı (DOĞRU YERİNDE) ---
 class Neo4jConnector:
     def __init__(self):
@@ -609,48 +609,46 @@ if prompt := st.chat_input("Mesajınızı buraya yazın..."):
             "last_recommended_place": None,
             "next_node": None
         }
+# Kullanıcıdan girdi al
+if prompt := st.chat_input("Mesajınızı buraya yazın..."):
+    # Kullanıcı mesajını geçmişe ekle ve görüntüle
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-        # LangGraph akışını çağırın
+    # LangGraph'ı çalıştırma
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        full_response = ""
+
+        # LangGraph stream metodunu kullanarak yanıtı parça parça alın
         try:
             graph_config = {"configurable": {"thread_id": st.session_state.conversation_thread_id}}
-            
+
             # LangGraph stream metodunu kullanarak yanıtı parça parça alın
-            # Loop through the stream to get updates
             for s in st.session_state.graph.stream(initial_state, config=graph_config):
-                # 's' is a dictionary where keys are node names and values are the state updates from that node
-                # We need to find the latest AIMessage from the updated state
-                if "messages" in s:
-                    # 's["messages"]' would contain the *difference* in messages for that step.
-                    # To get the cumulative messages, we'd typically need to access the full state.
-                    # For streaming display, we're interested in new AI messages being generated.
-                    for msg_obj in s["messages"]: # Iterate through all new messages from the step
-                        if isinstance(msg_obj, AIMessage):
-                            full_response_content = msg_obj.content
-                            # Stream the content to the placeholder
-                            temp_stream_display = ""
-                            for chunk in full_response_content.split():
-                                temp_stream_display += chunk + " "
-                                time.sleep(0.02) # Small delay for streaming effect
-                                message_placeholder.markdown(sanitize_markdown(temp_stream_display) + "▌")
-                            
-                            # Once the full AI message for the step is displayed, update the final placeholder
-                            message_placeholder.markdown(sanitize_markdown(full_response_content))
-                            # Append the *final* AI message of this step to session state messages
-                            st.session_state.messages.append({"role": "assistant", "content": full_response_content})
-                            break # Only care about the first AIMessage from this step's messages, if multiple exist
+                for key in s:
+                    node_output = s[key]
+                    if "messages" in node_output:
+                        for msg in reversed(node_output["messages"]):
+                            if isinstance(msg, AIMessage) and msg.content:
+                                # AI mesajını sanitize ederek göster
+                                full_response = msg.content
+                                message_placeholder.markdown(sanitize_markdown(full_response))
+                                # Session state'e ekle
+                                st.session_state.messages.append({"role": "assistant", "content": full_response})
+                                break
+                        if full_response:
+                            break
+                if full_response:
+                    break
 
-                if full_response_content: # If a full response was streamed for this turn
-                    break # Exit the outer streaming loop
-
-            # Fallback if no AI message was generated by the graph execution (e.g., if it hit END without sending a message)
-            if not full_response_content: 
-                fallback_message = "Üzgünüm, isteğinizi anlayamadım veya şu an yanıt veremiyorum. Daha spesifik bir şey mi denemek istersiniz?"
-                sanitized_fallback_message = sanitize_markdown(fallback_message) 
-                message_placeholder.markdown(sanitized_fallback_message)
-                st.session_state.messages.append({"role": "assistant", "content": fallback_message}) 
+            if not full_response:
+                fallback = "Anlayamadım, lütfen başka bir soru deneyin."
+                message_placeholder.markdown(sanitize_markdown(fallback))
+                st.session_state.messages.append({"role": "assistant", "content": fallback})
 
         except Exception as e:
-            error_message = f"Beklenmedik bir hata oluştu: {str(e)}\nLütfen daha sonra tekrar deneyin."
-            sanitized_error_message = sanitize_markdown(error_message) 
-            st.session_state.messages.append({"role": "assistant", "content": error_message}) 
-            st.error(sanitized_error_message)
+            error = f"Hata: {str(e)}"
+            message_placeholder.markdown(sanitize_markdown(error))
+            st.session_state.messages.append({"role": "assistant", "content": error})
