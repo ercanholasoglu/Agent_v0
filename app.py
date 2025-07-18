@@ -43,79 +43,58 @@ def sanitize_markdown(text):
     if not isinstance(text, str):
         return str(text)
 
-    sanitized_text = text
+    # 1. HTML varlıklarını kaçır (önce)
+    # Bu, < ve > gibi karakterlerin HTML tag'i olarak algılanmasını engeller
+    # ve daha sonra regex özel karakteri olarak kaçırılmasını kolaylaştırır.
+    sanitized_text = text.replace("&", "&amp;")
+    sanitized_text = sanitized_text.replace("<", "&lt;")
+    sanitized_text = sanitized_text.replace(">", "&gt;")
 
-    # Regex Group Specifier hatalarını önlemek için özel kaçışlar.
-    # Özellikle (?<, (?:, (? gibi kombinasyonlar.
-    # Regex'in kendi özel karakterlerini (., *, +, ?, [, ], (, ), {, }, \, |, ^, $, /)
-    # kaçış karakteriyle işaretlemek genellikle en güvenli yoldur.
-    # Ancak burada doğrudan hataya neden olan "group specifier" odaklanıyoruz.
-
-    # 1. Backslashes'ı (ters eğik çizgi) ilk başta kaçışla
-    # Bu, sonraki kaçış işlemlerinde kendi eklediğimiz kaçışları etkilememesi için önemlidir.
+    # 2. Backslashes'ı (ters eğik çizgi) ilk başta kaçışla
+    # Çünkü diğer karakterleri kaçarken eklenen ters eğik çizgi,
+    # kendisi de kaçış karakteri olarak algılanmamalıdır.
+    # HTML varlıklarından sonra yapılmalı ki "&amp;" gibi şeyler etkilenmesin.
     sanitized_text = sanitized_text.replace("\\", "\\\\")
 
-    # 2. Markdown ve potansiyel regex özel karakterlerini kaçışla.
-    # Önceki versiyonda eksik olan veya daha agresif kaçılması gerekenler.
-    # Özellikle `?`, `|`, `<`, `>` ve `:` gibi karakterler,
-    # regex'te özel anlam taşıyıp `(?<...` gibi yapılara neden olabilir.
-    # GFM (GitHub Flavored Markdown) için bazı kaçışlar farklı işleyebilir.
-    # En güvenli yol, metindeki her özel regex karakterini doğrudan kaçmaktır.
-    
-    # Listeye daha fazla potansiyel sorunlu karakter eklendi ve sıralama önemli olabilir.
-    special_chars = [
-        "`", "*", "_", "{", "}", "[", "]", "(", ")",
-        "#", "+", "-", ".", "!", "^", "$", # Common regex characters
-        "?", "|", "/", # Often problematic in URLs or regex
-        "&", # HTML entity before further processing
-        ":" # Often part of URLs or regex quantifiers or markdown specifics
-    ]
+    # 3. Tüm potansiyel regex özel karakterlerini kaçışla
+    # Bu set, yaygın tüm regex metakarakterlerini içerir.
+    # r"([{}()\[\].,*+?|^$])" bu deseni kullanmak,
+    # listedeki her bir karaktere tek tek bakmaktan daha verimlidir.
+    # Unutmayın, `re.escape` bir dizeyi *regex deseni olarak kullanmak* için kaçar.
+    # Burada ise dizeyi *düz metin olarak göstermek* için kaçıyoruz, bu yüzden
+    # manuel kaçış veya özel `re.sub` daha uygun.
 
-    # Regex'teki özel karakterleri kaçışla
-    # Sadece zaten kaçırılmamış olanları kaçışlamak daha doğru olur.
-    # re.sub ile kaçırılmamış özel karakterleri bulup kaçırmak daha güvenli.
-    # Ancak Streamlit'in frontend'inde genellikle basit text yerine
-    # Markdown parse edildiği için, her özel karakteri düz metin olarak
-    # algılanması için kaçmak iyi bir stratejidir.
-
-    for char in special_chars:
-        if char == "&":
-            sanitized_text = sanitized_text.replace(char, "&amp;")
-        elif char == "<":
-            sanitized_text = sanitized_text.replace(char, "&lt;")
-        elif char == ">":
-            sanitized_text = sanitized_text.replace(char, "&gt;")
-        else:
-            # Sadece tek başına görünen özel karakterleri kaçır.
-            # '\\' zaten kaçırıldı, o yüzden buradaki kaçış sadece tek karakter içindir.
-            sanitized_text = sanitized_text.replace(char, "\\" + char)
-
-    # Özellikle '(?<', '(?:', '(?' gibi gerçek regex yapılarına benzeyen şeyleri hedefleyelim.
-    # Bu, Markdown parser'ın bunları regex olarak algılamasını önler.
-    # Negatif lookbehind veya lookahead gibi karmaşık regex ifadeleri de sorun çıkarabilir.
-    # Bu tür karmaşık yapıları doğrudan kaçışlamak yerine, onları metin olarak algılatmak için
-    # her bir özel regex karakterini tek tek kaçışlamak daha güvenlidir.
+    # Regex metakarakterleri: . ^ $ * + ? { } [ ] \ | ( )
+    # Ek olarak, Markdown'da özel anlamı olan ve karışıklığa yol açabilecekler: ` -
+    # Ve URL'lerde sıkça kullanılan ve regex'te de yeri olan: : /
     
-    # Bu özel durumları daha agresif yakalamak için:
-    # (? -> \\(\?
-    # (?: -> \\(\\?:
-    # (?< -> \\(\\?<
-    # (?<= -> \\(\\?<
-    # (?<! -> \\(\\<!
+    # Not: re.escape zaten bu karakterlerin çoğunu kaçırır, ancak bazı durumlarda
+    # manuel kontrol daha iyidir. Ancak burada, doğrudan hedefliyoruz.
+    
+    # Problem genellikle '(', '?' gibi karakterlerin ardışık gelmesinden kaynaklanıyor.
+    # Örneğin: (?<name>)
+    
+    # Belirli regex grup belirleyicilerini hedefleyen özel durumlar
+    # (Bu kısım, önceki versiyonda olduğu gibi kalabilir, çünkü direkt olarak hedefliyor)
+    sanitized_text = re.sub(r'\\(\?<', r'\\\\(\?<', sanitized_text) # Zaten kaçırılmış `\(`'den sonra gelen `?`
+    sanitized_text = re.sub(r'\\(\?:', r'\\\\(\\?:', sanitized_text)
+    sanitized_text = re.sub(r'\\(\?', r'\\\\(\\?', sanitized_text)
 
-    # `re.escape` normalde bir string'i regex deseni olarak kullanılmak üzere kaçar.
-    # Burada ise tersine, bir string'in içindeki regex özel karakterlerini düz metin olarak
-    # algılanması için kaçmak istiyoruz.
+    # Genel regex özel karakterlerini kaçır
+    # Önemli: Bu regex, `re.sub` ile tüm bu karakterlerin önüne bir backslash ekler.
+    # HTML varlıkları ve `\\` için yapılan kaçışlardan SONRA çalışmalı.
     
-    # En kritik olan "invalid group specifier name" hatasını tetikleyen kombinasyonlar:
-    sanitized_text = re.sub(r'\(?<', r'\\(\?<', sanitized_text)
-    sanitized_text = re.sub(r'\(\?:', r'\\(\\?:', sanitized_text)
-    sanitized_text = re.sub(r'\(\?', r'\\(\?', sanitized_text)
-    
-    # Ayrıca, bazen tırnak işaretleri veya backticks içinde gelen JSON benzeri çıktılar da
-    # markdown parser'ı yanıltabilir.
-    # Örneğin, `{ "key": "value" }` veya `{"name": "test"}` gibi.
-    # Bunlar genellikle sorun çıkarmaz ama dikkat etmekte fayda var.
+    # Karakter setinin dışına çıkarılanlar:
+    # - `&`, `<`, `>`: Bunlar zaten HTML varlıklarına dönüştürüldü.
+    # - `\`: Zaten `\\` olarak kaçırıldı.
+    # Bunların dışındaki tüm regex özel karakterlerini ele alıyoruz.
+    regex_special_chars_pattern = re.compile(r"([{}()[\]*+?|^$/])")
+    sanitized_text = regex_special_chars_pattern.sub(r"\\\1", sanitized_text)
+
+    # Normalize unicode characters to handle various forms of accents, etc. (NFKD)
+    # Then encode to ASCII and decode, effectively removing non-ASCII characters
+    # that might cause rendering issues (e.g. smart quotes, em-dashes).
+    sanitized_text = unicodedata.normalize('NFKD', sanitized_text).encode('ascii', 'ignore').decode('utf-8')
 
     return sanitized_text
 
@@ -662,28 +641,30 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
     with st.spinner("Düşünüyorum... 🤔"):
         try:
             # Invoking with a config that includes the thread_id for state management
+            # Initialize latest_ai_content to a default empty string
+            latest_ai_content = "" 
+
             for s in st.session_state.graph.stream(inputs, config={"configurable": {"thread_id": thread_id}}):
-                # Streamlit doesn't natively support streaming updates to markdown in chat
-                # So we'll accumulate the full response for now
                 if "__end__" not in s:
-                    # The state update for messages is cumulative. We want the new AIMessage.
-                    # This assumes the last message in the `messages` list is the one added by the AI.
-                    # Adjust if your graph adds messages differently.
                     ai_response_message = s.get("messages", [])[-1] if s.get("messages") else None
                     if ai_response_message and isinstance(ai_response_message, AIMessage):
                         # Accumulate parts if streaming, or just take the final content if not
-                        latest_ai_content = ai_response_message.content
+                        # This assumes the stream yields the full message at the end of its processing for a node
+                        latest_ai_content = ai_response_message.content 
                         
-            # After the loop, the last `latest_ai_content` should be the full response
-            # After the AI generates a response:
-            final_ai_response_content = "..." # This is your AI's raw text response
-            sanitized_final_ai_response = sanitize_markdown(final_ai_response_content)
+            # After the loop, `latest_ai_content` will hold the complete AI response from the graph.
+            # Now, sanitize and display it.
+            if latest_ai_content:
+                sanitized_final_ai_response = sanitize_markdown(latest_ai_content)
+            else:
+                sanitized_final_ai_response = sanitize_markdown("Üzgünüm, bir yanıt üretemedim.")
 
             st.session_state.messages.append({"role": "assistant", "content": sanitized_final_ai_response})
             with st.chat_message("assistant"):
                 st.markdown(sanitized_final_ai_response)
 
         except Exception as e:
+
             error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin veya farklı bir soru sorun."
             sanitized_error_message = sanitize_markdown(error_message) # Make sure this is called
             st.session_state.messages.append({"role": "assistant", "content": sanitized_error_message})
