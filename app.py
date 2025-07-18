@@ -33,39 +33,45 @@ load_dotenv()
 # --- REVISED sanitize_markdown FUNCTION ---
 def sanitize_markdown(text):
     """
-    Streamlit's Markdown renderer'ında 'Invalid regular expression' hatalarını önlemek için
-    özel karakterleri güvenli bir şekilde kaçış karakteriyle işaretler.
+    Enhanced sanitization for Streamlit's Markdown renderer
     """
     if not isinstance(text, str):
         return str(text)
 
-    sanitized_text = text
+    # Step 1: Handle None/empty cases
+    if not text:
+        return ""
 
-    # 1. HTML özel karakterlerini kaçır (Her zaman ilk yapılmalı)
-    sanitized_text = sanitized_text.replace("&", "&amp;")
-    sanitized_text = sanitized_text.replace("<", "&lt;")
-    sanitized_text = sanitized_text.replace(">", "&gt;")
+    # Step 2: HTML escaping (should be first)
+    text = text.replace("&", "&amp;")
+    text = text.replace("<", "&lt;")
+    text = text.replace(">", "&gt;")
 
-    # 2. Backslashes'ı (ters eğik çizgi) kaçışla (Diğer kaçışlardan önce yapılmalı)
-    sanitized_text = sanitized_text.replace("\\", "\\\\")
+    # Step 3: Backslash escaping
+    text = text.replace("\\", "\\\\")
 
-    # 3. Özellikle 'Invalid group specifier name' hatasına neden olan regex desenlerini kaçır.
-    # Bu hata genellikle `(?<name>`, `(?:`, `(?=` gibi regex grup belirteçleri düz metin olarak geldiğinde oluşur.
-    # `\(` ve `\?` kombinasyonlarını hedefliyoruz.
-    sanitized_text = re.sub(r'\(\?', r'\\(\?', sanitized_text) # Converts `(` followed by `?` to `\(` `\?`
+    # Step 4: Special handling for regex group patterns
+    text = re.sub(r'\(\?P?<[^>]+>', r'\\(?P\\<\\>', text)  # Handle named groups
+    text = re.sub(r'\(\?[:=!]', r'\\(?:', text)  # Handle other regex extensions
 
-    # 4. Kalan yaygın Markdown ve Regex özel karakterlerini kaçır.
-    # Bu regex deseni, yukarıdaki işlemlerden sonra kalan ve hala sorun yaratabilecek karakterleri kapsar.
-    # `*`, `_`, `[`, `]`, `(`, `)`, `#`, `+`, `-`, `.`, `!`, `|`, `^`, `$`, `/`, `:`
-    # `re.escape` would do most of this, but manual approach gives more control after prior replacements.
-    markdown_and_regex_chars_pattern = re.compile(r"([*_{}\[\]()#+-.!|^$/:])")
-    sanitized_text = markdown_and_regex_chars_pattern.sub(r"\\\1", sanitized_text)
+    # Step 5: Escape other special characters
+    special_chars = r"*_{}[]()#+-.!|^$/:"
+    for char in special_chars:
+        text = text.replace(char, f"\\{char}")
 
-    # 5. Unicode normalizasyonu (Ek güvenlik için)
-    sanitized_text = unicodedata.normalize('NFKD', sanitized_text).encode('ascii', 'ignore').decode('utf-8')
+    # Step 6: Unicode normalization
+    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8')
 
-    return sanitized_text
+    return text
 
+def safe_markdown(text):
+    try:
+        # Test if the text causes regex issues
+        re.compile(text)
+        return text
+    except re.error:
+        # If problematic, return a sanitized version
+        return sanitize_markdown(text)
 # --- Neo4j Bağlantı Sınıfı ---
 class Neo4jConnector:
     def __init__(self):
@@ -619,7 +625,7 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
             st.session_state.messages.append({"role": "assistant", "content": sanitized_final_ai_response})
             with st.chat_message("assistant"):
-                st.markdown(sanitized_final_ai_response) # Corrected line to display the already sanitized response
+                 st.markdown(safe_markdown(sanitized_final_ai_response))
 
         except Exception as e:
             error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin veya farklı bir soru sorun."
