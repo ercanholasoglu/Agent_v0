@@ -169,7 +169,7 @@ def process_documents(docs: List[Any]) -> List[Document]:
                 "Fiyat Seviyesi": str(doc.get("price_level", "Yok"))
             }
             main_content = (
-                f"Mekan Adı: {metadata['Mekan Adanı']}, "
+                f"Mekan Adı: {metadata['Mekan Adı']}, " # CORRECTED: Changed 'Mekan Adanı' to 'Mekan Adı'
                 f"Adres: {metadata['Adres']}, "
                 f"Google Puanı: {metadata['Google Puanı']}, "
                 f"Google Yorum Sayısı: {metadata['Google Yorum Sayısı']}, "
@@ -597,7 +597,7 @@ if prompt := st.chat_input("Mesajınızı buraya yazın..."):
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
         full_response_content = "" # Use a distinct variable name
-
+        
         # Sadece son kullanıcı mesajını gönder
         initial_state = {
             "messages": [HumanMessage(content=prompt)],
@@ -618,26 +618,22 @@ if prompt := st.chat_input("Mesajınızı buraya yazın..."):
                     # 's["messages"]' would contain the *difference* in messages for that step.
                     # To get the cumulative messages, we'd typically need to access the full state.
                     # For streaming display, we're interested in new AI messages being generated.
-                    for key, value in s.items(): # Iterate through each node's output in the step
-                        if "messages" in value: # Check if this node updated messages
-                            # Find the latest AI message in the current node's message list
-                            for msg in reversed(value["messages"]):
-                                if isinstance(msg, AIMessage):
-                                    full_response_content = msg.content
-                                    # Stream the content to the placeholder
-                                    temp_stream_display = ""
-                                    for chunk in full_response_content.split():
-                                        temp_stream_display += chunk + " "
-                                        time.sleep(0.02) # Small delay for streaming effect
-                                        message_placeholder.markdown(sanitize_markdown(temp_stream_display) + "▌")
-                                    
-                                    # Once the full AI message for the step is displayed, update the final placeholder
-                                    message_placeholder.markdown(sanitize_markdown(full_response_content))
-                                    # Append the *final* AI message of this step to session state messages
-                                    st.session_state.messages.append({"role": "assistant", "content": full_response_content})
-                                    break # Only care about the last AI message from this node's output
-                            if full_response_content: # If an AI message was found and processed
-                                break # Exit the inner loop, as we've handled this step's main message
+                    for msg_obj in s["messages"]: # Iterate through all new messages from the step
+                        if isinstance(msg_obj, AIMessage):
+                            full_response_content = msg_obj.content
+                            # Stream the content to the placeholder
+                            temp_stream_display = ""
+                            for chunk in full_response_content.split():
+                                temp_stream_display += chunk + " "
+                                time.sleep(0.02) # Small delay for streaming effect
+                                message_placeholder.markdown(sanitize_markdown(temp_stream_display) + "▌")
+                            
+                            # Once the full AI message for the step is displayed, update the final placeholder
+                            message_placeholder.markdown(sanitize_markdown(full_response_content))
+                            # Append the *final* AI message of this step to session state messages
+                            st.session_state.messages.append({"role": "assistant", "content": full_response_content})
+                            break # Only care about the first AIMessage from this step's messages, if multiple exist
+
                 if full_response_content: # If a full response was streamed for this turn
                     break # Exit the outer streaming loop
 
