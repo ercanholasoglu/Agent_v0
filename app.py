@@ -36,29 +36,34 @@ def sanitize_markdown(text):
     karakteriyle işaretler. Bu, metnin olduğu gibi gösterilmesini sağlar.
     """
     if not isinstance(text, str):
-        return str(text) # Ensure it's a string before processing
+        return str(text)
 
-    sanitized_text = text.replace("\\", "\\\\") # Escape backslashes first to avoid double-escaping
-    sanitized_text = sanitized_text.replace("`", "\\`") # Escape backticks for code blocks
-    sanitized_text = sanitized_text.replace("*", "\\*") # Escape asterisks for bold/italic
-    sanitized_text = sanitized_text.replace("_", "\\_") # Escape underscores for italic
-    sanitized_text = sanitized_text.replace("{", "\\{").replace("}", "\\}") # Escape curly braces
-    sanitized_text = sanitized_text.replace("[", "\\[").replace("]", "\\]") # Escape square brackets for links/images
-    sanitized_text = sanitized_text.replace("(", "\\(").replace(")", "\\)") # Escape parentheses
-    sanitized_text = sanitized_text.replace("#", "\\#") # Escape hash for headers
-    sanitized_text = sanitized_text.replace("+", "\\+") # Escape plus sign
-    sanitized_text = sanitized_text.replace("-", "\\-") # Escape hyphen/dash (can be list item)
-    sanitized_text = sanitized_text.replace(".", "\\.") # Escape dot (can be list item or regex special)
-    sanitized_text = sanitized_text.replace("!", "\\!") # Escape exclamation mark (for images)
-    sanitized_text = sanitized_text.replace("?", "\\?") # Escape question mark
+    print(f"DEBUG: Sanitizing input: '{text[:100]}...'") # İlk 100 karakteri yazdır
+   
 
-    # Handle angle brackets as HTML entities, as they are often problematic
+    # Backslashes'ları ilk başta kaçış karakteriyle işaretle
+    sanitized_text = text.replace("\\", "\\\\") 
+    
+    # Diğer özel karakterleri kaçış karakteriyle işaretle
+    sanitized_text = sanitized_text.replace("`", "\\`") # Backticks için
+    sanitized_text = sanitized_text.replace("*", "\\*") # Kalın/italik için
+    sanitized_text = sanitized_text.replace("_", "\\_") # İtalik için
+    sanitized_text = sanitized_text.replace("{", "\\{").replace("}", "\\}") # Süslü parantezler
+    sanitized_text = sanitized_text.replace("[", "\\[").replace("]", "\\]") # Link/resim için köşeli parantezler
+    sanitized_text = sanitized_text.replace("(", "\\(").replace(")", "\\)") # Parantezler
+    sanitized_text = sanitized_text.replace("#", "\\#") # Başlıklar için
+    sanitized_text = sanitized_text.replace("+", "\\+") # Artı işareti
+    sanitized_text = sanitized_text.replace("-", "\\-") # Tire/çizgi (liste öğesi olabilir)
+    sanitized_text = sanitized_text.replace(".", "\\.") # Nokta (liste öğesi veya regex özel karakteri olabilir)
+    sanitized_text = sanitized_text.replace("!", "\\!") # Ünlem işareti (resimler için)
+    sanitized_text = sanitized_text.replace("?", "\\?") # Soru işareti
+
+    # Açılı parantezleri HTML varlıklarına dönüştür
     sanitized_text = sanitized_text.replace("<", "&lt;").replace(">", "&gt;")
 
     return sanitized_text
 
 
-class Neo4jConnector:
     def __init__(self):
         self.uri = os.getenv("NEO4J_URI")
         self.user = os.getenv("NEO4J_USER")
