@@ -11,7 +11,7 @@ from langchain_community.vectorstores import InMemoryVectorStore
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from neo4j import GraphDatabase
-from dotenv import load_dotenv # Bu kalsın
+from dotenv import load_dotenv
 from langchain_core.documents import Document
 from typing import List, Dict, Any 
 import re
@@ -25,58 +25,72 @@ from operator import add
 import unicodedata
 from langgraph.checkpoint.memory import MemorySaver
 import random
-from dotenv import load_dotenv
 import os
 
 load_dotenv()
 
-
-class Neo4jConnector:
-    def __init__(self): 
-        # Bu kısım zaten os.getenv kullandığı için buradaki değişiklikler yeterli
-        self.uri = os.getenv("NEO4J_URI") # Doğrudan .env'den alacak
-        self.user = os.getenv("NEO4J_USER")
-        self.password = os.getenv("NEO4J_PASSWORD")
-        self.database = os.getenv("NEO4J_DATABASE", "neo4j") # Default database name
-        self.driver = None
-
-
+# --- Markdown Sanitizasyon Fonksiyonu ---
+# Bu fonksiyon, herhangi bir sınıfın veya ana akışın dışında, global olarak tanımlanmalı.
+# Streamlit'in markdown işleyicisindeki regex hatalarını önlemek için daha genel bir temizlik.
 def sanitize_markdown(text):
-    return re.sub(r"\(\?<[^>]+>", "(", text)
-
+    """
+    Streamlit'in markdown işleyicisinde sorun çıkarabilecek belirli karakterleri temizler
+    veya kaçış karakteri ekler. Özellikle URL'lerde ve regex'lerde sorun yaratabilecek
+    karakterlere odaklanır.
+    """
+    # URL'lerdeki parantezleri ve diğer potansiyel sorunlu karakterleri temizlemeyi deneyelim
+    # Markdown linklerinde özel karakterler sorun yaratabilir.
+    # Burada `(?<foo>)` gibi desenleri değil, genel markdown ve URL güvenliğini hedefliyoruz.
+    
+    # Bazı özel karakterleri kaçış karakteriyle işaretle
+    # Streamlit'in kendi otolink işleyicisini bozmamak için URL linki formatı dışında olanları temizle
+    sanitized_text = text.replace(">", "&gt;").replace("<", "&lt;") # HTML etiketlerini önle
+    
+    # regex group specifier hatası için, genel olarak `(?<` ile başlayan her şeyi temizle
+    # Ancak bu, metindeki normal parantezleri de etkileyebilir.
+    # Eğer sorun hala devam ederse, bu satırı kaldırıp daha az invaziv bir çözüm düşünebiliriz.
+    sanitized_text = re.sub(r"\(\?<[^>]+>", "(", sanitized_text)
+    
+    # Köşeli parantez içindeki link formatlarında sorun oluşmaması için
+    # özellikle [metin](link) veya sadece link olan durumlarda dikkatli olmalıyız.
+    # Genel olarak, URL'lerin doğru formatta olduğundan emin olmak önemlidir.
+    
+    # Ekstra kontrol: Eğer metin içinde gerçekten `(?<name>)` gibi bir yapı olmasını beklemiyorsak,
+    # bu regex hala uygun olabilir. Ancak bu, `SyntaxError`'ın doğrudan çözümü olmayabilir
+    # çünkü hata JS tarafında fırlatılıyor olabilir.
+    
+    return sanitized_text
 
 class Neo4jConnector:
     def __init__(self):
         self.uri = os.getenv("NEO4J_URI")
         self.user = os.getenv("NEO4J_USER")
         self.password = os.getenv("NEO4J_PASSWORD")
-        self.database = os.getenv("NEO4J_DATABASE", "neo4j") # 'neo4j' varsayılan değeri hala geçerli, çünkü bu bir string literal.
+        self.database = os.getenv("NEO4J_DATABASE", "neo4j")
         self.driver = None
 
     def connect(self):
         """Establishes a connection to Neo4j."""
-        if self.driver is None: # Sadece bir kez bağlan
+        if self.driver is None:
             try:
                 self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
                 with self.driver.session(database=self.database) as session:
-                    session.run("RETURN 1") # Bağlantıyı test et
-                #st.success("Neo4j bağlantısı başarılı!") # Debug amaçlı
+                    session.run("RETURN 1")
             except Exception as exc:
-                st.error(f"Neo4j bağlantı hatası: {exc}") # Streamlit'te hata göster
+                st.error(f"Neo4j bağlantı hatası: {exc}")
                 raise ConnectionError(f"Neo4j bağlantı hatası: {exc}") from exc
 
     def close(self):
         """Closes the Neo4j driver if it's open."""
         if self.driver:
             self.driver.close()
-            self.driver = None # Driver'ı sıfırla ki tekrar bağlanabilsin
-    
+            self.driver = None
 
     def get_meyhaneler(self, limit: int = 10000) -> List[Dict[str, Any]]:
         """
         Fetches 'Meyhane' nodes from Neo4j in the format expected by your LangGraph app.
         """
-        self.connect() # Bağlantıyı her zaman hazırda tut
+        self.connect()
         query = """
         MATCH (m:Meyhane)
         RETURN
@@ -96,7 +110,7 @@ class Neo4jConnector:
                 result = session.run(query, limit=limit)
                 return [self._clean_record(record) for record in result]
         except Exception as exc:
-            st.error(f"Neo4j sorgu hatası (get_meyhaneler): {exc}") # Streamlit'te hata göster
+            st.error(f"Neo4j sorgu hatası (get_meyhaneler): {exc}")
             print(f"Sorgu hatası (get_meyhaneler): {exc}")
             return []
 
@@ -169,9 +183,9 @@ def process_documents(docs: List[Any]) -> List[Document]:
 @st.cache_resource
 def initialize_retriever():
     try:
-        conn = Neo4jConnector() # Yeni bir instance oluştur
+        conn = Neo4jConnector()
         meyhaneler_listesi = conn.get_meyhaneler(limit=10000) 
-        conn.close() # İşimiz bitince bağlantıyı kapat
+        conn.close()
         if not meyhaneler_listesi:
             st.warning("Uyarı: Neo4j'den hiç mekan verisi çekilemedi. Retrieval boş sonuç dönebilir. Dummy veri kullanılıyor.")
             meyhaneler_listesi = [
@@ -508,7 +522,7 @@ def general_response_node(state: AgentState) -> AgentState:
             state["messages"].append(AIMessage(content="Merhaba! Size nasıl yardımcı olabilirim?"))
     
     except Exception as e:
-        state["messages"].append(AIMessage(content=f"⚠️ Hata: {str(e)}"))
+        state["messages"].append(AIMessage(content=f"⚠️ Arama sırasında beklenmedik bir hata oluştu: {str(e)}"))
 
     return state
 
@@ -603,7 +617,6 @@ if prompt := st.chat_input("Mesajınızı buraya yazın..."):
             "next_node": None
         }
 
-        # LangGraph akışını çağırın
         # LangGraph akışını çağırın
         try:
             graph_config = {"configurable": {"thread_id": st.session_state.conversation_thread_id}}
