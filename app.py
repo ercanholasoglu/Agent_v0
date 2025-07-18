@@ -30,7 +30,6 @@ import os
 load_dotenv()
 
 
-import uuid
 import re
 import unicodedata
 
@@ -43,30 +42,42 @@ def sanitize_markdown(text):
     if not isinstance(text, str):
         return str(text)
 
+    sanitized_text = text
+
+    # Regex Group Specifier hatalarını önlemek için özel kaçışlar.
+    # Özellikle (?<, (?:, (? gibi kombinasyonlar.
+    # Regex'in kendi özel karakterlerini (., *, +, ?, [, ], (, ), {, }, \, |, ^, $, /)
+    # kaçış karakteriyle işaretlemek genellikle en güvenli yoldur.
+    # Ancak burada doğrudan hataya neden olan "group specifier" odaklanıyoruz.
+
     # 1. Backslashes'ı (ters eğik çizgi) ilk başta kaçışla
-    # Çünkü diğer karakterleri kaçarken eklenen ters eğik çizgi,
-    # kendisi de kaçış karakteri olarak algılanmamalıdır.
-    sanitized_text = text.replace("\\", "\\\\")
+    # Bu, sonraki kaçış işlemlerinde kendi eklediğimiz kaçışları etkilememesi için önemlidir.
+    sanitized_text = sanitized_text.replace("\\", "\\\\")
 
     # 2. Markdown ve potansiyel regex özel karakterlerini kaçışla.
-    # Özellikle '?' ve '<' gibi karakterler regex grup belirleyicileriyle çakışabilir.
-    # '|' da regex'te 'VEYA' anlamına gelir ve sorun çıkarabilir.
-    # '/' da URL'lerde kullanılır ve regex'te anlamı vardır.
-    # ':' de URL'lerde kullanılır ve regex'te anlamı olabilir.
-    # Bu karakterleri sadece tek başına değil, potansiyel olarak
-    # bir arada da düşünerek kaçmak önemlidir.
-    special_chars_for_regex_safety = [
+    # Önceki versiyonda eksik olan veya daha agresif kaçılması gerekenler.
+    # Özellikle `?`, `|`, `<`, `>` ve `:` gibi karakterler,
+    # regex'te özel anlam taşıyıp `(?<...` gibi yapılara neden olabilir.
+    # GFM (GitHub Flavored Markdown) için bazı kaçışlar farklı işleyebilir.
+    # En güvenli yol, metindeki her özel regex karakterini doğrudan kaçmaktır.
+    
+    # Listeye daha fazla potansiyel sorunlu karakter eklendi ve sıralama önemli olabilir.
+    special_chars = [
         "`", "*", "_", "{", "}", "[", "]", "(", ")",
-        "#", "+", "-", ".", "!", "?", "<", ">", "|",
+        "#", "+", "-", ".", "!", "^", "$", # Common regex characters
+        "?", "|", "/", # Often problematic in URLs or regex
         "&", # HTML entity before further processing
-        ":" # Often part of URLs or regex quantifiers
+        ":" # Often part of URLs or regex quantifiers or markdown specifics
     ]
 
-    for char in special_chars_for_regex_safety:
-        # Bu yaklaşım, karakteri her gördüğünde kaçış ekler.
-        # Örneğin, "&" yerine "&amp;" kullanmak daha güvenli olabilir.
-        # Ancak, bu spesifik "Invalid regular expression" hatası için
-        # doğrudan Markdown kaçışları daha ilgili.
+    # Regex'teki özel karakterleri kaçışla
+    # Sadece zaten kaçırılmamış olanları kaçışlamak daha doğru olur.
+    # re.sub ile kaçırılmamış özel karakterleri bulup kaçırmak daha güvenli.
+    # Ancak Streamlit'in frontend'inde genellikle basit text yerine
+    # Markdown parse edildiği için, her özel karakteri düz metin olarak
+    # algılanması için kaçmak iyi bir stratejidir.
+
+    for char in special_chars:
         if char == "&":
             sanitized_text = sanitized_text.replace(char, "&amp;")
         elif char == "<":
@@ -74,24 +85,36 @@ def sanitize_markdown(text):
         elif char == ">":
             sanitized_text = sanitized_text.replace(char, "&gt;")
         else:
-            # Sadece zaten kaçırılmış olmayan karakterleri kaçır.
-            # Örneğin, eğer bir stringte zaten "\?" varsa, bunu "\\?" yapma.
-            # Ancak `replace` her zaman yeni bir string oluşturur, bu yüzden
-            # bu basit `replace` ardışık kullanımı bazen beklenmedik sonuçlara yol açabilir
-            # veya gereksiz çift kaçışlar oluşturabilir.
-            # Daha güvenli bir yaklaşım, `re.sub` ile sadece kaçırılmamış olanları bulup kaçmaktır.
-            # Ancak, bu hata genellikle basit karakter kombinasyonlarından kaynaklandığı için
-            # direkt replace denemesi yapalım.
+            # Sadece tek başına görünen özel karakterleri kaçır.
+            # '\\' zaten kaçırıldı, o yüzden buradaki kaçış sadece tek karakter içindir.
             sanitized_text = sanitized_text.replace(char, "\\" + char)
 
-    # Son olarak, özellikle URL'leri ve potansiyel regex paternlerini tetikleyebilecek
-    # bazı kombinasyonları hedefleyelim.
-    # Örneğin, '(?<', '(?:' gibi gerçek regex yapılarına benzeyen şeyleri.
-    # Bu regexler, metinde zaten mevcut olan ve bir LLM tarafından üretilmiş olabilecek
-    # potansiyel hatalı kalıpları düzeltmeye odaklanır.
-    sanitized_text = re.sub(r'\(\?<', r'\\(\\?<', sanitized_text) # Handles (?<
-    sanitized_text = re.sub(r'\(\?:', r'\\(\\?:', sanitized_text) # Handles (?:
-    sanitized_text = re.sub(r'\(\?', r'\\(\\?', sanitized_text)   # Handles (?
+    # Özellikle '(?<', '(?:', '(?' gibi gerçek regex yapılarına benzeyen şeyleri hedefleyelim.
+    # Bu, Markdown parser'ın bunları regex olarak algılamasını önler.
+    # Negatif lookbehind veya lookahead gibi karmaşık regex ifadeleri de sorun çıkarabilir.
+    # Bu tür karmaşık yapıları doğrudan kaçışlamak yerine, onları metin olarak algılatmak için
+    # her bir özel regex karakterini tek tek kaçışlamak daha güvenlidir.
+    
+    # Bu özel durumları daha agresif yakalamak için:
+    # (? -> \\(\?
+    # (?: -> \\(\\?:
+    # (?< -> \\(\\?<
+    # (?<= -> \\(\\?<
+    # (?<! -> \\(\\<!
+
+    # `re.escape` normalde bir string'i regex deseni olarak kullanılmak üzere kaçar.
+    # Burada ise tersine, bir string'in içindeki regex özel karakterlerini düz metin olarak
+    # algılanması için kaçmak istiyoruz.
+    
+    # En kritik olan "invalid group specifier name" hatasını tetikleyen kombinasyonlar:
+    sanitized_text = re.sub(r'\(?<', r'\\(\?<', sanitized_text)
+    sanitized_text = re.sub(r'\(\?:', r'\\(\\?:', sanitized_text)
+    sanitized_text = re.sub(r'\(\?', r'\\(\?', sanitized_text)
+    
+    # Ayrıca, bazen tırnak işaretleri veya backticks içinde gelen JSON benzeri çıktılar da
+    # markdown parser'ı yanıltabilir.
+    # Örneğin, `{ "key": "value" }` veya `{"name": "test"}` gibi.
+    # Bunlar genellikle sorun çıkarmaz ama dikkat etmekte fayda var.
 
     return sanitized_text
 
@@ -608,7 +631,9 @@ if not os.getenv("OPENAI_API_KEY") or not os.getenv("OPENWEATHER_API_KEY"):
 if "graph" not in st.session_state:
     st.session_state.graph = create_workflow()
 if "conversation_thread_id" not in st.session_state:
-    st.session_state.conversation_thread_id = str(uuid.uuid4()) 
+    # Generate a unique thread ID for a new conversation or retrieve an existing one
+    # This could be based on a user ID, session ID, or a new UUID for each session
+    st.session_state.conversation_thread_id = str(random.uuid4()) # Use uuid for uniqueness
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -649,9 +674,8 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
                         latest_ai_content = ai_response_message.content
                         
             # After the loop, the last `latest_ai_content` should be the full response
-            final_ai_response_content = latest_ai_content if 'latest_ai_content' in locals() else "Üzgünüm, bir yanıt üretemedim."
-            
-            # Sanitize the final content before displaying and saving
+            # After the AI generates a response:
+            final_ai_response_content = "..." # This is your AI's raw text response
             sanitized_final_ai_response = sanitize_markdown(final_ai_response_content)
 
             st.session_state.messages.append({"role": "assistant", "content": sanitized_final_ai_response})
@@ -660,7 +684,7 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
         except Exception as e:
             error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin veya farklı bir soru sorun."
-            sanitized_error_message = sanitize_markdown(error_message)
+            sanitized_error_message = sanitize_markdown(error_message) # Make sure this is called
             st.session_state.messages.append({"role": "assistant", "content": sanitized_error_message})
             with st.chat_message("assistant"):
                 st.markdown(sanitized_error_message)
