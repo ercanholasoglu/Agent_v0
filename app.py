@@ -38,94 +38,21 @@ def sanitize_markdown(text):
     if not isinstance(text, str):
         return str(text) # Ensure it's a string before processing
 
-    # Characters that have special meaning in Markdown and/or regex
-    # The order matters: escape backslashes first!
-    sanitized_text = text.replace("\\", "\\\\") # Escape backslashes themselves
-    
-    # Escape common markdown/regex special characters that could cause issues
-    # Note: Streamlit's auto-linking often relies on unescaped parentheses and colons for URLs.
-    # We will escape them generally and then try to be smart about re-introducing link safety
-    # if necessary, but for a SyntaxError, brute-force escaping is often best.
-    special_chars_to_escape = [
-        '`', '*', '_', '{', '}', '[', ']',  # Markdown formatting
-        '#', '+', '-', '.', '!', '$', '^',  # Markdown/regex special
-        '|', '?', '~', '<', '>'             # Other potential regex/HTML issues
-    ]
-    
-    # Temporarily replace common URL patterns to protect them
-    # This is a bit advanced, might not be strictly necessary, but can help
-    # if the issue is *within* a valid URL being auto-linked.
-    # For now, let's stick to the simpler, aggressive escaping.
+    sanitized_text = text.replace("\\", "\\\\") # Escape backslashes first to avoid double-escaping
+    sanitized_text = sanitized_text.replace("`", "\\`") # Escape backticks for code blocks
+    sanitized_text = sanitized_text.replace("*", "\\*") # Escape asterisks for bold/italic
+    sanitized_text = sanitized_text.replace("_", "\\_") # Escape underscores for italic
+    sanitized_text = sanitized_text.replace("{", "\\{").replace("}", "\\}") # Escape curly braces
+    sanitized_text = sanitized_text.replace("[", "\\[").replace("]", "\\]") # Escape square brackets for links/images
+    sanitized_text = sanitized_text.replace("(", "\\(").replace(")", "\\)") # Escape parentheses
+    sanitized_text = sanitized_text.replace("#", "\\#") # Escape hash for headers
+    sanitized_text = sanitized_text.replace("+", "\\+") # Escape plus sign
+    sanitized_text = sanitized_text.replace("-", "\\-") # Escape hyphen/dash (can be list item)
+    sanitized_text = sanitized_text.replace(".", "\\.") # Escape dot (can be list item or regex special)
+    sanitized_text = sanitized_text.replace("!", "\\!") # Escape exclamation mark (for images)
+    sanitized_text = sanitized_text.replace("?", "\\?") # Escape question mark
 
-    for char in special_chars_to_escape:
-        sanitized_text = sanitized_text.replace(char, f"\\{char}")
-    
-    # Handle parentheses and colons carefully, as they are crucial for URLs.
-    # If the error specifically mentions "group specifier name", the issue is likely
-    # with a literal `(` followed by `?` followed by `<`.
-    # Let's specifically target `(?<` if it appears literally in the text where it shouldn't.
-    # This regex attempts to find `(?<` *not* followed immediately by a valid character for a named group.
-    # A named group must start with a letter or underscore. So, `(?<` followed by anything else might be the culprit.
-    
-    # A more general approach: if you have `(?<foo>)` in your *data*, it's likely part of a string
-    # that shouldn't be interpreted as regex.
-    # The error comes from Streamlit's *internal* regex when parsing markdown.
-    # So, the problem isn't your Python regex, but some string in your data that resembles one.
-    
-    # Simplest: replace literal problematic sequences if known.
-    # If a literal `(?<` exists and is causing issues, escape the `?` and `<`
-    sanitized_text = sanitized_text.replace("(?<", "(?<") # This is incorrect, it needs to be escaped.
-    
-    # Let's re-evaluate the core problem:
-    # `transformGfmAutolinkLiterals` tries to find URLs.
-    # URLs *can* contain characters like `?` and `<`.
-    # The error "invalid group specifier name" strongly suggests `(?<something>)`
-    # appearing in your content, and `something` is not a valid regex group name.
-    # Example: If your text contains `I have a question: (?<what>) Is this a problem?`
-    # The `(?<what>)` part is being interpreted by the JS regex engine.
-
-    # The most direct fix is to escape the `?` and `<` when they appear together
-    # in a sequence that might be misinterpreted.
-    # However, a general character escape for all special characters is more robust.
-    # Let's re-run with the most robust simple escaping, then consider targeted fixes if it persists.
-    
-    # The previous general character escaping should handle this.
-    # If a URL contains `?` it's valid. If it contains `<` it's usually `&lt;` in HTML.
-    # The error suggests a *regex* parsing failure, not HTML.
-    
-    # Let's just escape the most common markdown characters that might be mistaken for regex.
-    # Revisit the problem: the previous `sanitize_markdown` included a line:
-    # `sanitized_text = re.sub(r"\(\?<[^>]+>", "(", sanitized_text)`
-    # This line *itself* uses a regex with `\(\?`, which is correct for Python.
-    # But if the *output* of your function still contains unescaped `?` or `<`
-    # and they combine with `(` from your text to form `(?<`, then the Streamlit JS engine might fail.
-
-    # The most bulletproof method is to ensure no literal markdown formatting characters
-    # or regex special characters remain unescaped *unless* they are part of a valid URL
-    # or other intentional markdown structure.
-    
-    # Let's simplify and make it very robust: escape anything that has special meaning in markdown.
-    # And then, ensure `&lt;` and `&gt;` for `<` and `>`.
-    
-    # New approach for `sanitize_markdown`:
-    # 1. Escape backslashes first.
-    # 2. Escape all other markdown special characters.
-    # 3. Explicitly handle `<` and `>` as HTML entities.
-
-    sanitized_text = text.replace("\\", "\\\\") # Escape backslashes
-    sanitized_text = sanitized_text.replace("`", "\\`") # Backticks
-    sanitized_text = sanitized_text.replace("*", "\\*") # Asterisks for bold/italic
-    sanitized_text = sanitized_text.replace("_", "\\_") # Underscores for italic
-    sanitized_text = sanitized_text.replace("{", "\\{").replace("}", "\\}") # Curly braces
-    sanitized_text = sanitized_text.replace("[", "\\[").replace("]", "\\]") # Square brackets for links/images
-    sanitized_text = sanitized_text.replace("(", "\\(").replace(")", "\\)") # Parentheses for links/general text
-    sanitized_text = sanitized_text.replace("#", "\\#") # Hash for headers
-    sanitized_text = sanitized_text.replace("+", "\\+") # Plus sign
-    sanitized_text = sanitized_text.replace("-", "\\-") # Hyphen/dash (can be list item)
-    sanitized_text = sanitized_text.replace(".", "\\.") # Dot (can be list item or regex special)
-    sanitized_text = sanitized_text.replace("!", "\\!") # Exclamation mark (for images or general text)
-
-    # For HTML characters
+    # Handle angle brackets as HTML entities, as they are often problematic
     sanitized_text = sanitized_text.replace("<", "&lt;").replace(">", "&gt;")
 
     return sanitized_text
@@ -407,7 +334,6 @@ def check_weather_node(state: AgentState) -> AgentState:
 
     sanitized_formatted = sanitize_markdown(formatted)
     state["messages"].append(AIMessage(content=sanitized_formatted))
-    state["messages"].append(AIMessage(content=formatted)) # Keep this line for the actual content
     return state
 
 def add_system_message(state: AgentState) -> AgentState:
@@ -480,7 +406,6 @@ def search_meyhaneler_node(state: AgentState) -> AgentState:
             
             sanitized_fallback_message = sanitize_markdown(fallback_message)
             state["messages"].append(AIMessage(content=sanitized_fallback_message))
-            state["messages"].append(AIMessage(content=fallback_message)) # Keep this line for the actual content
             return state
 
         # Sadece ilk 5 sonucu göster
@@ -525,7 +450,6 @@ def search_meyhaneler_node(state: AgentState) -> AgentState:
         print(f"DEBUG ERROR in search_meyhaneler_node: {e}")
         sanitized_error_message = sanitize_markdown(f"⚠️ Arama sırasında beklenmedik bir hata oluştu: {str(e)}")
         state["messages"].append(AIMessage(content=sanitized_error_message))
-        # Remove the duplicated line if present: state["messages"].append(AIMessage(content="\n".join(formatted_results)))
         return state
 
 def router_node(state: AgentState) -> AgentState:
@@ -547,7 +471,6 @@ def fun_fact_node(state: AgentState) -> AgentState:
 
     sanitized_fact = sanitize_markdown(f"🤔 İlginç Bilgi: {fact}")
     state["messages"].append(AIMessage(content=sanitized_fact))
-    state["messages"].append(AIMessage(content=f"🤔 İlginç Bilgi: {fact}")) # Keep this line for actual content
     return state
 
 def general_response_node(state: AgentState) -> AgentState:
@@ -582,11 +505,8 @@ def general_response_node(state: AgentState) -> AgentState:
     except Exception as e:
         sanitized_error = sanitize_markdown(f"⚠️ Hata: {str(e)}")
         state["messages"].append(AIMessage(content=sanitized_error))
-        # Remove the duplicated line if present: state["messages"].append(AIMessage(content=response.content))
-        if response and hasattr(response, "content") and response.content:
-            state["messages"].append(AIMessage(content=response.content))
-        else:
-            state["messages"].append(AIMessage(content="Merhaba! Size nasıl yardımcı olabilirim?")) # Fallback
+        sanitized_fallback = sanitize_markdown("Merhaba! Size nasıl yardımcı olabilirim?")
+        state["messages"].append(AIMessage(content=sanitized_fallback))
     
     return state
 
@@ -659,7 +579,6 @@ if "messages" not in st.session_state:
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(sanitize_markdown(message["content"]))
-        # No need for the second st.markdown(message["content"]) here, as it was redundant.
 
 
 # Kullanıcıdan girdi al
