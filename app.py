@@ -35,46 +35,26 @@ def sanitize_markdown(text):
         return str(text)
     if not text:
         return ""
-
-    # Step 1: HTML escaping for basic safety
-    text = text.replace("&", "&amp;")
-    text = text.replace("<", "&lt;")
-    text = text.replace(">", "&gt;")
-
-    # Step 2: Escape backslashes first to prevent them from escaping other characters
-    text = text.replace("\\", "\\\\")
-
-    # Step 3: Escape common markdown special characters that might interfere with autolinking
-    # This list can be expanded based on problematic patterns
-    special_chars = ['*', '_', '`', '[', ']', '(', ')', '#', '+', '-', '.', '!', '~', '|', '{', '}']
-    for char in special_chars:
+    
+    # HTML özel karakterleri
+    text = text.replace("&", "&amp;").replace("<", "<").replace(">", ">")
+    
+    # Kaçırılması gereken Markdown karakterleri
+    markdown_chars = ['\\', '*', '_', '~', '`', '#', '[', ']', '(', ')', '{', '}', '!', '^']
+    for char in markdown_chars:
         text = text.replace(char, f"\\{char}")
-
-    # Optional: More aggressive escaping for patterns that might look like URLs or emails if you don't want them autolinked
-    # If you truly want to prevent ANY autolinking, you might need to preprocess more heavily.
-    # For example, replace '.' with '\.' but be careful not to break valid markdown.
-    # This is generally NOT recommended as it breaks intended markdown behavior,
-    # but could be a last resort for specific problematic strings.
-    # text = text.replace('.', '\\.')
-    # text = text.replace('@', '\\@')
-
+    
     return text
 
 
 def safe_markdown(text):
-    """
-    Attempts to compile the text as a regex to catch *Python* regex issues.
-    This function is primarily a diagnostic/safety check for Python-side regex;
-    the `sanitize_markdown` function is the primary fix for the Streamlit frontend error.
-    It's kept for general robustness but might be less relevant for the specific
-    JavaScript `SyntaxError`.
-    """
     try:
-        re.compile(text) 
+        # Basitçe regex uyumluluğunu kontrol et
+        re.compile(text)
         return text
     except re.error:
-        # If it's not a valid Python regex, sanitize it for Markdown display.
-        return sanitize_markdown(text)
+        # Regex hatası varsa, tüm metni saf metin gibi göster
+        return f"<pre>{text}</pre>"
 
 # --- Neo4j Bağlantı Sınıfı ---
 class Neo4jConnector:
@@ -630,7 +610,7 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
             st.session_state.messages.append({"role": "assistant", "content": sanitized_final_ai_response})
             with st.chat_message("assistant"):
-                 st.markdown(safe_markdown(sanitized_final_ai_response))
+                st.html(sanitize_markdown(latest_ai_content))
 
         except Exception as e:
             error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin veya farklı bir soru sorun."
