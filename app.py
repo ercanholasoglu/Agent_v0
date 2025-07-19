@@ -31,12 +31,9 @@ import uuid
 load_dotenv()
 
 # --- REVISED sanitize_markdown FUNCTION ---
-
-# --- ENHANCED sanitize_markdown FUNCTION ---
 def sanitize_markdown(text):
     """
-    Final enhanced sanitization for Streamlit's Markdown renderer.
-    Focuses on escaping regex-like patterns that cause JavaScript errors.
+    Enhanced sanitization for Streamlit's Markdown renderer, focusing on regex group specifiers.
     """
     if not isinstance(text, str):
         return str(text)
@@ -44,51 +41,66 @@ def sanitize_markdown(text):
     if not text:
         return ""
 
-    # Step 1: HTML escaping (prevents HTML interpretation)
+    # Step 1: HTML escaping (must be first to prevent re-interpretation of escaped characters)
+    # This ensures that characters like '&', '<', '>' are rendered literally, not as HTML.
     text = text.replace("&", "&amp;")
     text = text.replace("<", "&lt;")
     text = text.replace(">", "&gt;")
 
-    # Step 2: Escape problematic regex patterns FIRST
-    # This is the most critical fix for the frontend error
-    regex_patterns = [
-        r'\(\?P<[^>]+>',    # Python-style named groups
-        r'\(\?[:=!]',        # Non-capturing groups
-        r'\(\?<',            # Lookbehinds
-        r'\(\?=',            # Lookaheads
-        r'\(\?!'             # Negative lookaheads
-    ]
-    
-    for pattern in regex_patterns:
-        text = re.sub(pattern, lambda m: m.group(0).replace('(', '\\('), text)
-
-    # Step 3: Backslash escaping for Markdown special characters
-    special_chars = r"_*{}[]()#+-.!|:"
-    for char in special_chars:
-        text = text.replace(char, f"\\{char}")
-
-    # Step 4: Escape backslashes (must be after regex pattern handling)
+    # Step 2: Escape backslashes themselves first to prevent issues with subsequent escaping.
+    # If a backslash is part of an intended escape sequence, this will double it (e.g., '\n' becomes '\\n'),
+    # but Streamlit's markdown parser usually handles this correctly for literal output.
     text = text.replace("\\", "\\\\")
 
-    # Step 5: Unicode normalization
+    # Step 3: Specific handling for patterns resembling Python-style named regex groups
+    # and other problematic regex constructs that might appear in text.
+    # This is the most crucial part for the reported error.
+    # We escape the problematic characters within these patterns.
+
+    # Escape Python-style named capture groups e.g., (?P<name>...)
+    # The regex matches '(?P<' followed by any word characters (the group name) and then '>'.
+    # We replace it with '\(\?P<groupname\)>' to escape the '(', '?', '<', and '>'.
+    text = re.sub(r'\(\?P<([a-zA-Z0-9_]+)>', r'\\(\?P<\\1\\>)', text)
+    
+    # Escape other common non-capturing or special group specifiers in regex,
+    # such as (?:, (?=, (?!, (?>.
+    # These also start with '(?', which can trigger the JavaScript regex parser.
+    # We escape the '(' and '?' characters.
+    text = re.sub(r'\(\?[:=!>]', r'\\(?:', text)
+
+    # Step 4: Escape other common Markdown special characters that might be
+    # misinterpreted or cause formatting issues if they appear literally in text.
+    # This should be done *after* the specific regex escaping.
+    # We iterate through a predefined list of special characters.
+    special_chars = r"_*{}[]()#+-.!|:" # Exclude ^ and $ as they are typically fine unless used as anchors
+    for char in special_chars:
+        # We already escaped backslashes in Step 2, so this ensures we don't
+        # create invalid sequences like '\\\\*' if '*' was already escaped.
+        # This simple replace is effective because the `re.sub` for regex groups
+        # already handled the most complex scenarios.
+        text = text.replace(char, f"\\{char}")
+
+    # Step 5: Unicode normalization.
+    # This helps in consistent character representation and can prevent issues
+    # with different forms of the same character (e.g., accented characters).
+    # It should be done after all escaping to avoid breaking escape sequences.
     text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8')
 
     return text
 
-
 def safe_markdown(text):
     """
-    Attempts to compile the text as a regex to catch issues, otherwise sanitizes.
-    Note: This is for catching *Python* regex issues. The core problem is *JavaScript* regex.
-    The primary fix should be in sanitize_markdown for output.
-    This function might be less relevant for the reported frontend error but kept for general safety.
+    Attempts to compile the text as a regex to catch *Python* regex issues.
+    This function is primarily a diagnostic/safety check for Python-side regex;
+    the `sanitize_markdown` function is the primary fix for the Streamlit frontend error.
+    It's kept for general robustness but might be less relevant for the specific
+    JavaScript `SyntaxError`.
     """
     try:
-        # This check is primarily for the *Python* regex engine.
-        # It's less effective for the Streamlit frontend's *JavaScript* regex engine.
         re.compile(text) 
         return text
     except re.error:
+        # If it's not a valid Python regex, sanitize it for Markdown display.
         return sanitize_markdown(text)
 
 # --- Neo4j Bağlantı Sınıfı ---
@@ -590,13 +602,6 @@ def create_workflow():
     return graph
 
 # --- STREAMLIT UYGULAMASI ---
-# ... (existing code remains the same) ...
-# ... (existing code remains the same) ...
-
-# --- STREAMLIT UYGULAMASI ---
-                # ... (existing code remains the same) ...
-
-# --- STREAMLIT UYGULAMASI ---
 st.set_page_config(page_title="İstanbul Mekan Asistanı 💬", page_icon="🌃")
 
 st.title("İstanbul Mekan Asistanı 💬")
@@ -610,13 +615,9 @@ if not os.getenv("OPENAI_API_KEY") or not os.getenv("OPENWEATHER_API_KEY"):
 # LangGraph'ı başlat (sadece bir kez)
 if "graph" not in st.session_state:
     st.session_state.graph = create_workflow()
-    
-# Konuşma durumunu başlat
-if "conversation_context" not in st.session_state:
-    st.session_state.conversation_context = {
-        "last_recommended_place": None,
-        "location_query": None
-    }
+if "conversation_thread_id" not in st.session_state:
+    # Generate a unique thread ID for a new conversation or retrieve an existing one
+    st.session_state.conversation_thread_id = str(uuid.uuid4()) # Use uuid for uniqueness
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -626,37 +627,28 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Kullanıcıdan girdi al
+# Kullanıcıdan girdi al (SADECE BURADA OLMALI)
 if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"):
     # Kullanıcı mesajını geçmişe ekle ve görüntüle
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # LangGraph için giriş hazırla (mevcut bağlamı kullan)
-    inputs = {
-        "messages": [HumanMessage(content=prompt)],
-        "last_recommended_place": st.session_state.conversation_context["last_recommended_place"],
-        "location_query": st.session_state.conversation_context["location_query"]
-    }
+    # LangGraph'ı çalıştırma ve yanıt üretme
+    inputs = {"messages": [HumanMessage(content=prompt)]}
+    
+    thread_id = st.session_state.conversation_thread_id
     
     with st.spinner("Düşünüyorum... 🤔"):
         try:
             latest_ai_content = "" 
 
-            # LangGraph işlemini çalıştır
-            for s in st.session_state.graph.stream(inputs):
+            for s in st.session_state.graph.stream(inputs, config={"configurable": {"thread_id": thread_id}}):
                 if "__end__" not in s:
                     ai_response_message = s.get("messages", [])[-1] if s.get("messages") else None
                     if ai_response_message and isinstance(ai_response_message, AIMessage):
                         latest_ai_content = ai_response_message.content 
                         
-                        # Konuşma bağlamını güncelle
-                        if "last_recommended_place" in s:
-                            st.session_state.conversation_context["last_recommended_place"] = s["last_recommended_place"]
-                        if "location_query" in s:
-                            st.session_state.conversation_context["location_query"] = s["location_query"]
-            
             if latest_ai_content:
                 sanitized_final_ai_response = sanitize_markdown(latest_ai_content)
             else:
