@@ -486,40 +486,43 @@ def fun_fact_node(state: AgentState) -> AgentState:
 def general_response_node(state: AgentState) -> AgentState:
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
 
+    human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
+    last_query = human_messages[-1].content.lower() if human_messages else ""
+
+    # Check for greeting triggers FIRST
+    greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın", "hi", "alo"]
+    if any(g in last_query for g in greeting_triggers):
+        responses = [
+            "Merhaba! 👋 İstanbul'da romantik mekan, meyhane, restoran ya da kafe önerisi almak ister misin?",
+            "Selam! Size nasıl yardımcı olabilirim? Hava durumu bilgisi veya mekan önerisi alabilirsiniz. 🏙️",
+            "Günaydın! ☀️ Hangi mekan ya da hava durumu bilgisiyle yardımcı olayım?",
+            "Nasılsın? İstanbul'da nereye gitmek istersin? Romantik bir mekan mı, meyhane mi? 🍷"
+        ]
+        chosen = random.choice(responses)
+        state["messages"].append(AIMessage(content=sanitize_markdown(chosen))) # Sanitize here
+        return state # Return early if it's a greeting
+
+    # If not a greeting, proceed with LLM invocation
     try:
-        human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
-        if human_messages:
-            last_query = human_messages[-1].content.lower()
-
-            # Karşılama mesajları
-            greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın", "hi", "alo"]
-            if any(g in last_query for g in greeting_triggers):
-                responses = [
-                    "Merhaba! 👋 İstanbul'da romantik mekan, meyhane, restoran ya da kafe önerisi almak ister misin?",
-                    "Selam! Size nasıl yardımcı olabilirim? Hava durumu bilgisi veya mekan önerisi alabilirsiniz. 🏙️",
-                    "Günaydın! ☀️ Hangi mekan ya da hava durumu bilgisiyle yardımcı olayım?",
-                    "Nasılsın? İstanbul'da nereye gitmek istersin? Romantik bir mekan mı, meyhane mi? 🍷"
-                ]
-                chosen = random.choice(responses)
-                state["messages"].append(AIMessage(content=chosen))
-                return state
-
         response = llm.invoke(state["messages"])
         if response and hasattr(response, "content") and response.content:
             sanitized_content = sanitize_markdown(response.content)
             state["messages"].append(AIMessage(content=sanitized_content))
         else:
-            sanitized_fallback = sanitize_markdown("Merhaba! Size nasıl yardımcı olabilirim?")
+            # Fallback if LLM returns empty/invalid
+            sanitized_fallback = sanitize_markdown("Üzgünüm, bir yanıt üretemedim veya isteğinizi anlayamadım. Size nasıl yardımcı olabilirim?")
             state["messages"].append(AIMessage(content=sanitized_fallback))
-    
     except Exception as e:
-        sanitized_error = sanitize_markdown(f"⚠️ Hata: {str(e)}")
+        # Catch any errors during LLM invocation
+        error_message = f"⚠️ Hata: {str(e)}. LLM yanıtı alınamadı."
+        print(f"DEBUG: Error in general_response_node LLM invocation: {e}")
+        sanitized_error = sanitize_markdown(error_message)
         state["messages"].append(AIMessage(content=sanitized_error))
-        sanitized_fallback = sanitize_markdown("Merhaba! Size nasıl yardımcı olabilirim?")
-        state["messages"].append(AIMessage(content=sanitized_fallback))
-    
-    return state
+        # Add a general fallback if an error occurs
+        sanitized_fallback_after_error = sanitize_markdown("Merhaba! Size nasıl yardımcı olabilirim?")
+        state["messages"].append(AIMessage(content=sanitized_fallback_after_error))
 
+    return state
 
 @st.cache_resource
 def create_workflow():
@@ -609,16 +612,19 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
         try:
             latest_ai_content = "" 
             for s in st.session_state.graph.stream(inputs, config={"configurable": {"thread_id": thread_id}}):
-                if "__end__" not in s:
+                 print(f"DEBUG: Stream step: {s}") # Add this to see all streamed output
+                 if "__end__" not in s:
                     ai_response_message = s.get("messages", [])[-1] if s.get("messages") else None
                     if ai_response_message and isinstance(ai_response_message, AIMessage):
                         latest_ai_content = ai_response_message.content 
+                        print(f"DEBUG: Latest AI content from stream: {latest_ai_content}") # See content as it's built
 
             if latest_ai_content:
                 sanitized_final_ai_response = sanitize_markdown(latest_ai_content)
+                print(f"DEBUG: Final AI response (sanitized): {sanitized_final_ai_response}")
             else:
-                # Bu fallback mesajı neden tetikleniyor, asıl sorumuz bu.
                 sanitized_final_ai_response = sanitize_markdown("Üzgünüm, bir yanıt üretemedim.")
+                print("DEBUG: No AI content produced from stream.")
 
             st.session_state.messages.append({"role": "assistant", "content": sanitized_final_ai_response})
             with st.chat_message("assistant"):
