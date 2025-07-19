@@ -11,51 +11,51 @@ from langchain_community.vectorstores import InMemoryVectorStore
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from neo4j import GraphDatabase
-##from dotenv import load_dotenv
+# Removed: from dotenv import load_dotenv
 from langchain_core.documents import Document
-from typing import List, Dict, Any 
+from typing import List, Dict, Any
 import re
 import requests
 from datetime import datetime
 from cachetools import cached, TTLCache
-import graphviz 
+import graphviz
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.prompts import MessagesPlaceholder
-from operator import add 
+from operator import add
 import unicodedata
 from langgraph.checkpoint.memory import MemorySaver
 import random
 import os
 import uuid
 
-
+# Load secrets directly from Streamlit's secrets management
 try:
     OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
     OPENWEATHER_API_KEY = st.secrets["OPENWEATHER_API_KEY"]
-    TAVILY_API_KEY = st.secrets["TAVILY_API_KEY"] # If you use Tavily, ensure it's in secrets
+    TAVILY_API_KEY = st.secrets["TAVILY_API_KEY"]
     URI = st.secrets["NEO4J_URI"]
     USERNAME = st.secrets["NEO4J_USER"]
     PASSWORD = st.secrets["NEO4J_PASSWORD"]
-    NEO4J_DATABASE = st.secrets.get("NEO4J_DATABASE", "neo4j") # Use .get with a default for optional secrets
+    NEO4J_DATABASE = st.secrets.get("NEO4J_DATABASE", "neo4j")
 except KeyError as e:
     st.error(f"Missing Streamlit secret: {e}. Please configure this in your Streamlit Cloud dashboard.")
-    st.stop() # Stop the app if essential secrets are missing
-    
-    
+    st.stop()
+
+
 def sanitize_markdown(text):
     if not isinstance(text, str):
         return str(text)
     if not text:
         return ""
-    
+
     # HTML özel karakterleri
     text = text.replace("&", "&amp;").replace("<", "<").replace(">", ">")
-    
+
     # Kaçırılması gereken Markdown karakterleri
     markdown_chars = ['\\', '*', '_', '~', '`', '#', '[', ']', '(', ')', '{', '}', '!', '^']
     for char in markdown_chars:
         text = text.replace(char, f"\\{char}")
-    
+
     return text
 
 
@@ -71,13 +71,13 @@ def safe_markdown(text):
 # --- Neo4j Bağlantı Sınıfı ---
 class Neo4jConnector:
     def __init__(self):
-        # These are correctly reading from NEO4J_URI, NEO4J_USER, etc.
-        self.uri = os.getenv("NEO4J_URI")
-        self.user = os.getenv("NEO4J_USER")
-        self.password = os.getenv("NEO4J_PASSWORD")
-        self.database = os.getenv("NEO4J_DATABASE", "neo4j")
+        # These should now read from st.secrets directly
+        self.uri = st.secrets["NEO4J_URI"] # Corrected
+        self.user = st.secrets["NEO4J_USER"] # Corrected
+        self.password = st.secrets["NEO4J_PASSWORD"] # Corrected
+        self.database = st.secrets.get("NEO4J_DATABASE", "neo4j") # Corrected
         self.driver = None
-        
+
     def connect(self):
         """Establishes a connection to Neo4j."""
         if self.driver is None:
@@ -94,10 +94,12 @@ class Neo4jConnector:
         if self.driver:
             self.driver.close()
             self.driver = None
-            
-    if not st.secrets.get("OPENAI_API_KEY") or not st.secrets.get("OPENWEATHER_API_KEY"):
-        st.error("⚠️ API anahtarları eksik! Lütfen Streamlit Cloud kontrol panelinizdeki 'Secrets' kısmında `OPENAI_API_KEY` ve `OPENWEATHER_API_KEY` değişkenlerini ayarlayın.")
-        st.stop()
+
+    # This check needs to be removed from here, it's out of place.
+    # if not st.secrets.get("OPENAI_API_KEY") or not st.secrets.get("OPENWEATHER_API_KEY"):
+    #     st.error("⚠️ API anahtarları eksik! Lütfen Streamlit Cloud kontrol panelinizdeki 'Secrets' kısmında `OPENAI_API_KEY` ve `OPENWEATHER_API_KEY` değişkenlerini ayarlayın.")
+    #     st.stop()
+
 
     def get_meyhaneler(self, limit: int = 10000) -> List[Dict[str, Any]]:
         """
@@ -197,7 +199,7 @@ def process_documents(docs: List[Any]) -> List[Document]:
 def initialize_retriever():
     try:
         conn = Neo4jConnector()
-        meyhaneler_listesi = conn.get_meyhaneler(limit=10000) 
+        meyhaneler_listesi = conn.get_meyhaneler(limit=10000)
         conn.close()
         if not meyhaneler_listesi:
             st.warning("Uyarı: Neo4j'den hiç mekan verisi çekilemedi. Retrieval boş sonuç dönebilir. Dummy veri kullanılıyor.")
@@ -213,11 +215,11 @@ def initialize_retriever():
             {"name": "Dummy Meyhane B", "address": "Dummy Adres B", "rating": 4.5, "review_count": 250, "map_link": "http://dummy.map.b", "phone": "000", "price_level": 3, "neo4j_element_id": "dummy-b"},
             {"name": "Dummy Meyhane C", "address": "Dummy Adres C", "rating": 3.8, "review_count": 50, "map_link": "http://dummy.map.c", "phone": "000", "price_level": 1, "neo4j_element_id": "dummy-c"},
         ]
-    
+
     processed_docs = process_documents(meyhaneler_listesi)
     vectorstore = InMemoryVectorStore.from_documents(
         documents=processed_docs,
-        embedding=OpenAIEmbeddings()
+        embedding=OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY) # Pass API key explicitly
     )
     return vectorstore.as_retriever(search_kwargs={"k": 5})
 
@@ -257,7 +259,7 @@ def clean_location_query(query: str) -> str:
     normalized_query = unicodedata.normalize('NFKD', query.lower()).encode('ascii', 'ignore').decode('utf-8')
 
     istanbul_locations = [
-        r'etiler', r'levent', r'maslak', r'nisantasi', r'nisantaşi', 
+        r'etiler', r'levent', r'maslak', r'nisantasi', r'nisantaşi',
         r'bebek', r'arnavutkoy', r'arnavutköy', r'ortakoy', r'ortaköy', r'cihangir',
         r'taksim', r'karakoy', r'karaköy', r'galata', r'fatih',
         r'sultanahmet', r'eminonu', r'eminönü', r'kadikoy', r'kadıköy', r'moda',
@@ -265,14 +267,14 @@ def clean_location_query(query: str) -> str:
         r'maltepe', r'kartal', r'pendik', r'uskudar', r'üsküdar',
         r'camlica', r'çamlıca', r'beykoz', r'atasehir', r'ataşehir', r'cekmekoy', r'çekmeköy',
         r'sariyer', r'sarıyer', r'istinye', r'tarabya', r'yenikoy', r'yeniköy',
-        r'bahcekoy', r'bahçeköy', r'buyukdere', r'büyükdere', r'zumrutevler', r'zümrütevler',
+        r'bahcekoy', r'bahçeköy', r'buyukdere', r'büyükdere', r'zumrutevler', r'zümrutevler',
         r'florya', r'yesilkoy', r'yeşilköy', r'yesilyurt', 'yeşilyurt', r'bakirkoy', r'bakırköy',
         r'atakoy', r'ataköy', r'zeytinburnu', r'gungoren', r'güngören', r'esenler',
         r'bayrampasa', r'bayrampaşa', r'gaziosmanpasa', r'gaziosmanpaşa', r'eyup', r'eyüp', r'kagithane', r'kağıthane',
         r'sisli', r'şişli', r'besiktas', r'beşiktaş', r'avcilar', r'avcılar', r'beylikduzu', 'beylikdüzü',
         r'esenyurt', r'buyukcekmece', r'büyükçekmece', r'silivri', r'catalca', r'çatalca',
         r'sile', r'şile', r'agva', r'ağva', r'adalar', r'basaksehir', 'başakşehir',
-        r'bahcelievler', r'bahçelievler', r'kucukcekmece', r'küçükçekmece', r'cankurtaran' 
+        r'bahcelievler', r'bahçelievler', r'kucukcekmece', r'küçükçekmece', r'cankurtaran'
     ]
 
     for loc_regex in istanbul_locations:
@@ -297,7 +299,7 @@ weather_cache = TTLCache(maxsize=100, ttl=300)
 
 @cached(weather_cache)
 def get_openweather_forecast(location: str) -> Dict:
-    api_key = os.getenv("OPENWEATHER_API_KEY")
+    api_key = st.secrets.get("OPENWEATHER_API_KEY") # Corrected
     if not api_key:
         return {"error": "API anahtarı bulunamadı."}
     try:
@@ -344,7 +346,7 @@ def check_weather_node(state: AgentState) -> AgentState:
     query = last_msg.content
 
     location = state.get("location_query") or clean_location_query(query)
-    state["location_query"] = location 
+    state["location_query"] = location
 
     formatted = format_weather_response(location, get_openweather_forecast(location))
 
@@ -354,7 +356,7 @@ def check_weather_node(state: AgentState) -> AgentState:
 
 def add_system_message(state: AgentState) -> AgentState:
     system_msg = SystemMessage(content=SYSTEM_PROMPT)
-    
+
     if not any(isinstance(msg, SystemMessage) for msg in state["messages"]):
         return {"messages": [system_msg] + state["messages"]}
     else:
@@ -364,14 +366,14 @@ def summarize_conversation(state: AgentState) -> AgentState:
     messages = state["messages"]
 
     if len(messages) > 5: # Konuşma belirli bir uzunluğu aşınca özetle
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, openai_api_key=OPENAI_API_KEY) # Pass API key explicitly
         chain = SUMMARY_PROMPT | llm
         summary = chain.invoke({"messages": messages})
 
         return {
             "messages": [
                 SystemMessage(content=SYSTEM_PROMPT),
-                AIMessage(content=summary.content) 
+                AIMessage(content=summary.content)
             ]
         }
     else:
@@ -382,7 +384,7 @@ def search_meyhaneler_node(state: AgentState) -> AgentState:
     query = last_msg.content
 
     location = clean_location_query(query)
-    state["location_query"] = location 
+    state["location_query"] = location
 
     try:
         # Arama sorgusunu iyileştir
@@ -396,11 +398,11 @@ def search_meyhaneler_node(state: AgentState) -> AgentState:
         for doc in raw_results:
             address_lower = unicodedata.normalize('NFKD', doc.metadata.get("Adres", "").lower()).encode('ascii', 'ignore').decode('utf-8')
             name_lower = unicodedata.normalize('NFKD', doc.metadata.get("Mekan Adı", "").lower()).encode('ascii', 'ignore').decode('utf-8')
-            
+
             # Eğer konum sorguda yer alıyorsa ve mekanın adresi veya adı bu konumu içeriyorsa ekle
             if normalized_location in address_lower or normalized_location in name_lower:
                 filtered_results.append(doc)
-        
+
         # Eğer filtrelemeden sonra hala sonuç yoksa veya ilk 3 sonuç yoksa daha geniş arama yap
         if not filtered_results or len(filtered_results) < 3:
             # Sadece İstanbul için genel arama
@@ -415,11 +417,11 @@ def search_meyhaneler_node(state: AgentState) -> AgentState:
 
         if not filtered_results:
             fallback_message = f"❌ Üzgünüm, **{location.capitalize()}** bölgesinde aradığınız kriterlere uygun bir mekan bulamadım."
-            if location == "istanbul": 
+            if location == "istanbul":
                 fallback_message += " Veritabanımızda genel olarak İstanbul'da bu kriterlere uygun bir mekan bulamadım."
-            else: 
+            else:
                 fallback_message += " Belki aradığınız konumdaki verilerimiz eksiktir veya o bölgede kriterlerinize uyan bir yer yoktur. Lütfen farklı bir bölge veya daha genel bir arama yapmayı deneyin."
-            
+
             sanitized_fallback_message = sanitize_markdown(fallback_message)
             state["messages"].append(AIMessage(content=sanitized_fallback_message))
             return state
@@ -439,7 +441,7 @@ def search_meyhaneler_node(state: AgentState) -> AgentState:
             rating_display = f"⭐ {rating:.1f}" if rating > 0 else "⭐ Değerlendirilmemiş"
             review_count_display = f"({review_count} yorum)" if review_count > 0 else "(Yorum yok)"
             phone_display = f"📞 Telefon: {phone}" if phone and phone != "Yok" else ""
-            
+
             price_display = ""
             if isinstance(price_level_raw, (int, float)):
                 price_display = f"💸 Fiyat Seviyesi: {'₺' * int(price_level_raw)}"
@@ -471,7 +473,7 @@ def search_meyhaneler_node(state: AgentState) -> AgentState:
 def router_node(state: AgentState) -> AgentState:
     last_msg = state["messages"][-1]
     content = last_msg.content.lower()
-    
+
     if any(t in content for t in ["meyhane", "restoran", "kafe", "date", "randevu", "mekan", "öneri", "neresi", "yer", "yemek", "içki"]):
         state["next_node"] = "search"
     elif any(t in content for t in ["hava", "weather", "sıcaklık", "nem", "yağmur", "açık", "kapalı", "derece"]):
@@ -490,14 +492,17 @@ def fun_fact_node(state: AgentState) -> AgentState:
     return state
 
 def general_response_node(state: AgentState) -> AgentState:
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, openai_api_key=OPENAI_API_KEY) # Pass API key explicitly
 
     human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
     last_query = human_messages[-1].content.lower() if human_messages else ""
 
+    print(f"DEBUG: general_response_node - last_query: '{last_query}'") # Added debug print
+
     # Check for greeting triggers FIRST
     greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın", "hi", "alo"]
     if any(g in last_query for g in greeting_triggers):
+        print("DEBUG: general_response_node - Greeting detected!") # Added debug print
         responses = [
             "Merhaba! 👋 İstanbul'da romantik mekan, meyhane, restoran ya da kafe önerisi almak ister misin?",
             "Selam! Size nasıl yardımcı olabilirim? Hava durumu bilgisi veya mekan önerisi alabilirsiniz. 🏙️",
@@ -539,14 +544,14 @@ def create_workflow():
     workflow.add_node("weather", check_weather_node)
     workflow.add_node("general", general_response_node)
     workflow.add_node("fun_fact", fun_fact_node)
-    workflow.add_node("summarize", summarize_conversation) 
-    
+    workflow.add_node("summarize", summarize_conversation)
+
     workflow.add_edge(START, "add_system_message")
     workflow.add_edge("add_system_message", "router")
-    
+
     workflow.add_conditional_edges(
         "router",
-        lambda state: state["next_node"], 
+        lambda state: state["next_node"],
         {
             "search": "search",
             "weather": "weather",
@@ -558,16 +563,16 @@ def create_workflow():
     workflow.add_edge("search", END)
     workflow.add_edge("weather", END)
     workflow.add_edge("fun_fact", END)
-    
+
     workflow.add_conditional_edges(
         "general",
-        lambda state: "summarize" if len(state["messages"]) > 5 else END, 
+        lambda state: "summarize" if len(state["messages"]) > 5 else END,
         {
-            "summarize": "summarize", 
-            END: END 
+            "summarize": "summarize",
+            END: END
         }
     )
-    workflow.add_edge("summarize", END) 
+    workflow.add_edge("summarize", END)
 
     memory = MemorySaver()
     graph = workflow.compile(checkpointer=memory)
@@ -581,9 +586,10 @@ st.title("İstanbul Mekan Asistanı 💬")
 st.markdown(sanitize_markdown("Merhaba! Ben İstanbul'daki romantik mekan, meyhane, restoran ve kafe önerileri sunan yapay zeka asistanıyım. Ayrıca hava durumu bilgisi veya ilginç bilgiler de sağlayabilirim. Size nasıl yardımcı olabilirim? 😊"))
 
 # API Anahtarlarının ayarlı olup olmadığını kontrol et
-# This check will now work correctly after load_dotenv() is at the top
-if not os.getenv("OPENAI_API_KEY") or not os.getenv("OPENWEATHER_API_KEY"): # Changed to os.getenv as it's safer
-    st.error("⚠️ API anahtarları eksik! Lütfen `os.environ` içinde `OPENAI_API_KEY` ve `OPENWEATHER_API_KEY` değişkenlerini ayarlayın.")
+# This check should now be redundant if the initial try-except block handles missing secrets
+# However, keeping it for extra safety. Just make sure it uses st.secrets.get()
+if not st.secrets.get("OPENAI_API_KEY") or not st.secrets.get("OPENWEATHER_API_KEY"): # Corrected to st.secrets.get()
+    st.error("⚠️ API anahtarları eksik! Lütfen Streamlit Cloud kontrol panelinizdeki 'Secrets' kısmında `OPENAI_API_KEY` ve `OPENWEATHER_API_KEY` değişkenlerini ayarlayın.")
     st.stop() # Uygulamayı durdur
 
 # LangGraph'ı başlat (sadece bir kez)
@@ -611,18 +617,18 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
     # LangGraph'ı çalıştırma ve yanıt üretme
     inputs = {"messages": [HumanMessage(content=prompt)]}
-    
+
     thread_id = st.session_state.conversation_thread_id
-    
+
     with st.spinner("Düşünüyorum... 🤔"):
         try:
-            latest_ai_content = "" 
+            latest_ai_content = ""
             for s in st.session_state.graph.stream(inputs, config={"configurable": {"thread_id": thread_id}}):
                  print(f"DEBUG: Stream step: {s}") # Add this to see all streamed output
                  if "__end__" not in s:
                     ai_response_message = s.get("messages", [])[-1] if s.get("messages") else None
                     if ai_response_message and isinstance(ai_response_message, AIMessage):
-                        latest_ai_content = ai_response_message.content 
+                        latest_ai_content = ai_response_message.content
                         print(f"DEBUG: Latest AI content from stream: {latest_ai_content}") # See content as it's built
 
             if latest_ai_content:
