@@ -37,6 +37,7 @@ try:
     USERNAME = st.secrets["NEO4J_USER"]
     PASSWORD = st.secrets["NEO4J_PASSWORD"]
     NEO4J_DATABASE = st.secrets.get("NEO4J_DATABASE", "neo4j")
+    st.success("API keys and Neo4j credentials loaded successfully from Streamlit secrets.")
 except KeyError as e:
     st.error(f"Missing Streamlit secret: {e}. Please configure this in your Streamlit Cloud dashboard.")
     st.stop()
@@ -44,6 +45,7 @@ except KeyError as e:
 
 def sanitize_markdown(text):
     if not isinstance(text, str):
+        st.warning(f"sanitize_markdown received non-string input: {type(text)} - {text}")
         return str(text)
     if not text:
         return ""
@@ -85,6 +87,7 @@ class Neo4jConnector:
                 self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
                 with self.driver.session(database=self.database) as session:
                     session.run("RETURN 1")
+                st.info("Neo4j bağlantısı başarılı.")
             except Exception as exc:
                 st.error(f"Neo4j bağlantı hatası: {exc}")
                 raise ConnectionError(f"Neo4j bağlantı hatası: {exc}") from exc
@@ -94,6 +97,7 @@ class Neo4jConnector:
         if self.driver:
             self.driver.close()
             self.driver = None
+            st.info("Neo4j bağlantısı kapatıldı.")
 
 
     def get_meyhaneler(self, limit: int = 10000) -> List[Dict[str, Any]]:
@@ -118,7 +122,9 @@ class Neo4jConnector:
         try:
             with self.driver.session(database=self.database) as session:
                 result = session.run(query, limit=limit)
-                return [self._clean_record(record) for record in result]
+                records = [self._clean_record(record) for record in result]
+                st.info(f"Neo4j'den {len(records)} mekan çekildi.")
+                return records
         except Exception as exc:
             st.error(f"Neo4j sorgu hatası (get_meyhaneler): {exc}")
             print(f"Sorgu hatası (get_meyhaneler): {exc}")
@@ -187,11 +193,14 @@ def process_documents(docs: List[Any]) -> List[Document]:
                 page_content=main_content,
                 metadata=metadata
             ))
+    st.info(f"LangChain için {len(processed)} doküman işlendi.")
     return processed
 
 # --- Neo4j Verilerini Yükle ve Vektör Deposunu Oluştur (Sadece Bir Kez Çalıştır) ---
 @st.cache_resource
 def initialize_retriever():
+    st.info("Retriever başlatılıyor...")
+    meyhaneler_listesi = []
     try:
         conn = Neo4jConnector()
         meyhaneler_listesi = conn.get_meyhaneler(limit=10000)
@@ -203,6 +212,9 @@ def initialize_retriever():
                 {"name": "Dummy Meyhane B", "address": "Dummy Adres B", "rating": 4.5, "review_count": 250, "map_link": "http://dummy.map.b", "phone": "000", "price_level": 3, "neo4j_element_id": "dummy-b"},
                 {"name": "Dummy Meyhane C", "address": "Dummy Adres C", "rating": 3.8, "review_count": 50, "map_link": "http://dummy.map.c", "phone": "000", "price_level": 1, "neo4j_element_id": "dummy-c"},
             ]
+            st.info(f"Dummy veri kullanılıyor: {len(meyhaneler_listesi)} mekan.")
+        else:
+            st.info(f"Neo4j'den gerçek veri kullanılıyor: {len(meyhaneler_listesi)} mekan.")
     except Exception as e:
         st.error(f"Neo4j'den veri çekerken hata oluştu: {e}. Lütfen Neo4j sunucunuzun çalıştığından ve kimlik bilgilerinin doğru olduğundan emin olun. Dummy veri kullanılıyor.")
         meyhaneler_listesi = [
@@ -210,13 +222,24 @@ def initialize_retriever():
             {"name": "Dummy Meyhane B", "address": "Dummy Adres B", "rating": 4.5, "review_count": 250, "map_link": "http://dummy.map.b", "phone": "000", "price_level": 3, "neo4j_element_id": "dummy-b"},
             {"name": "Dummy Meyhane C", "address": "Dummy Adres C", "rating": 3.8, "review_count": 50, "map_link": "http://dummy.map.c", "phone": "000", "price_level": 1, "neo4j_element_id": "dummy-c"},
         ]
+        st.info(f"Dummy veri kullanılıyor: {len(meyhaneler_listesi)} mekan.")
 
     processed_docs = process_documents(meyhaneler_listesi)
-    vectorstore = InMemoryVectorStore.from_documents(
-        documents=processed_docs,
-        embedding=OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY) # Pass API key explicitly
-    )
-    return vectorstore.as_retriever(search_kwargs={"k": 5})
+    try:
+        vectorstore = InMemoryVectorStore.from_documents(
+            documents=processed_docs,
+            embedding=OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY) # Pass API key explicitly
+        )
+        st.success("Vektör deposu başarıyla oluşturuldu.")
+        return vectorstore.as_retriever(search_kwargs={"k": 5})
+    except Exception as e:
+        st.error(f"Vektör deposu oluşturulurken hata oluştu: {e}. OpenAI API anahtarınızı kontrol edin.")
+        # Return a dummy retriever to prevent crash
+        class DummyRetriever:
+            def invoke(self, query, k):
+                st.warning("Dummy retriever kullanılıyor. Gerçek arama yapılamıyor.")
+                return [Document(page_content="Dummy Mekan", metadata={"Mekan Adı": "Dummy Mekan", "Adres": "Bilinmiyor", "Google Puanı": "0.0", "Google Yorum Sayısı": "0", "Maps Linki": "", "Telefon": "", "Fiyat Seviyesi": ""})]
+        return DummyRetriever()
 
 retriever = initialize_retriever()
 
@@ -242,16 +265,26 @@ SUMMARY_PROMPT = ChatPromptTemplate.from_messages([
 # --- Yardımcı Fonksiyonlar ---
 @cached(TTLCache(maxsize=100, ttl=3600))
 def get_fun_fact() -> str:
+    st.info("İlginç bilgi alınıyor...")
     try:
         response = requests.get("https://uselessfacts.jsph.pl/api/v2/facts/random?language=tr", timeout=5)
-        if response.status_code == 200:
-            return response.json().get("text", "İlginç bir bilgi bulunamadı.")
-        return "Bugün için ilginç bir bilgi yok."
-    except Exception:
-        return "İlginç bilgi servisi şu an çalışmıyor."
+        response.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
+        fact = response.json().get("text", "İlginç bir bilgi bulunamadı.")
+        st.success(f"İlginç bilgi alındı: {fact[:50]}...")
+        return fact
+    except requests.exceptions.Timeout:
+        st.error("İlginç bilgi servisi zaman aşımına uğradı.")
+        return "İlginç bilgi servisi şu an çok yavaş veya çalışmıyor."
+    except requests.exceptions.RequestException as e:
+        st.error(f"İlginç bilgi servisi hatası: {e}")
+        return f"İlginç bilgi servisi şu an çalışmıyor. Hata: {e}"
+    except Exception as e:
+        st.error(f"İlginç bilgi alınırken beklenmedik hata: {e}")
+        return f"İlginç bilgi alınırken beklenmedik bir hata oluştu: {e}"
 
 def clean_location_query(query: str) -> str:
     normalized_query = unicodedata.normalize('NFKD', query.lower()).encode('ascii', 'ignore').decode('utf-8')
+    st.info(f"Konum sorgusu temizleniyor: '{query}' -> '{normalized_query}'")
 
     istanbul_locations = [
         r'etiler', r'levent', r'maslak', r'nisantasi', r'nisantaşi',
@@ -275,6 +308,7 @@ def clean_location_query(query: str) -> str:
     for loc_regex in istanbul_locations:
         match = re.search(r'\b' + loc_regex + r'\b', normalized_query)
         if match:
+            st.info(f"Konum bulundu (İstanbul): {match.group(0)}")
             return match.group(0)
 
     general_cities = [
@@ -286,39 +320,58 @@ def clean_location_query(query: str) -> str:
     for city_regex in general_cities:
         match = re.search(r'\b' + city_regex + r'\b', normalized_query)
         if match:
+            st.info(f"Konum bulundu (Genel Şehir): {match.group(0)}")
             return match.group(0)
 
+    st.info("Konum bulunamadı, 'istanbul' varsayılan olarak ayarlandı.")
     return "istanbul"
 
 weather_cache = TTLCache(maxsize=100, ttl=300)
 
 @cached(weather_cache)
 def get_openweather_forecast(location: str) -> Dict:
+    st.info(f"Hava durumu tahmini alınıyor: {location}")
     api_key = st.secrets.get("OPENWEATHER_API_KEY") # Corrected
     if not api_key:
+        st.error("OpenWeather API anahtarı bulunamadı.")
         return {"error": "API anahtarı bulunamadı."}
     try:
-        geo = requests.get(
+        geo_response = requests.get(
             f"http://api.openweathermap.org/geo/1.0/direct?q={location},TR&limit=1&appid={api_key}",
             timeout=10,
-        ).json()
+        )
+        geo_response.raise_for_status()
+        geo = geo_response.json()
         if not geo:
+            st.warning(f"'{location}' konumu için coğrafi veri bulunamadı.")
             return {"error": f"'{location}' konumu bulunamadı."}
         lat, lon = geo[0]["lat"], geo[0]["lon"]
-        weather = requests.get(
+        st.info(f"Coğrafi koordinatlar: Lat={lat}, Lon={lon}")
+
+        weather_response = requests.get(
             f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units=metric&lang=tr",
             timeout=10,
-        ).json()
+        )
+        weather_response.raise_for_status()
+        weather = weather_response.json()
+        st.success(f"{location} için hava durumu verisi başarıyla alındı.")
         return weather
     except requests.exceptions.RequestException as e:
+        st.error(f"OpenWeather API hatası: {e}")
         return {"error": f"API hatası: {e}"}
+    except Exception as e:
+        st.error(f"Hava durumu verisi alınırken beklenmedik hata: {e}")
+        return {"error": f"Beklenmedik bir hata oluştu: {e}"}
 
 def format_weather_response(location: str, data: Dict) -> str:
+    st.info(f"Hava durumu yanıtı formatlanıyor for {location}...")
     if "error" in data:
+        st.error(f"Hava durumu formatlama hatası: {data['error']}")
         return f"❌ {data['error']}"
     try:
         lines = [f"🌤️ **{location.capitalize()} Hava Durumu Tahmini:**"]
         if "list" not in data or not data["list"]:
+            st.warning(f"{location.capitalize()} için hava durumu listesi boş.")
             return f"❌ {location.capitalize()} için hava durumu tahmini bulunamadı."
 
         for item in data.get("list", [])[:8]: # Sonraki 24 saat için (3 saatte bir)
@@ -331,60 +384,82 @@ def format_weather_response(location: str, data: Dict) -> str:
                 f"Nem: {item['main']['humidity']}%, "
                 f"Rüzgar: {item['wind']['speed']} m/s"
             )
-        return "\n".join(lines)
+        formatted_string = "\n".join(lines)
+        st.success("Hava durumu yanıtı başarıyla formatlandı.")
+        return formatted_string
     except Exception as e:
+        st.error(f"Hava durumu verisi işlenirken hata oluştu: {e}")
         return f"❌ Hava durumu verisi işlenirken hata oluştu: {e}"
 
 # --- LangGraph Nodes ---
 def check_weather_node(state: AgentState) -> AgentState:
+    st.info("`check_weather_node` çalışıyor.")
     last_msg = state["messages"][-1]
     query = last_msg.content
 
     location = state.get("location_query") or clean_location_query(query)
     state["location_query"] = location
+    st.info(f"Hava durumu sorgulanacak konum: {location}")
 
     formatted = format_weather_response(location, get_openweather_forecast(location))
 
     sanitized_formatted = sanitize_markdown(formatted)
     state["messages"].append(AIMessage(content=sanitized_formatted))
+    st.success("Hava durumu yanıtı AIMessage olarak eklendi.")
     return state
 
 def add_system_message(state: AgentState) -> AgentState:
+    st.info("`add_system_message` çalışıyor.")
     system_msg = SystemMessage(content=SYSTEM_PROMPT)
 
     if not any(isinstance(msg, SystemMessage) for msg in state["messages"]):
+        st.info("Sistem mesajı eklendi.")
         return {"messages": [system_msg] + state["messages"]}
     else:
+        st.info("Sistem mesajı zaten mevcut.")
         return state
 
 def summarize_conversation(state: AgentState) -> AgentState:
+    st.info("`summarize_conversation` çalışıyor.")
     messages = state["messages"]
 
     if len(messages) > 5: # Konuşma belirli bir uzunluğu aşınca özetle
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, openai_api_key=OPENAI_API_KEY) # Pass API key explicitly
-        chain = SUMMARY_PROMPT | llm
-        summary = chain.invoke({"messages": messages})
-
-        return {
-            "messages": [
-                SystemMessage(content=SYSTEM_PROMPT),
-                AIMessage(content=summary.content)
-            ]
-        }
+        st.info(f"Sohbet özetleniyor, mesaj sayısı: {len(messages)}")
+        try:
+            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, openai_api_key=OPENAI_API_KEY) # Pass API key explicitly
+            chain = SUMMARY_PROMPT | llm
+            summary = chain.invoke({"messages": messages})
+            st.success("Sohbet başarıyla özetlendi.")
+            return {
+                "messages": [
+                    SystemMessage(content=SYSTEM_PROMPT),
+                    AIMessage(content=summary.content)
+                ]
+            }
+        except Exception as e:
+            st.error(f"Sohbet özetlenirken hata oluştu: {e}")
+            # Fallback to current messages if summarization fails
+            return state
     else:
+        st.info("Sohbet özetlenmedi, mesaj sayısı 5'ten az.")
         return state
 
 def search_meyhaneler_node(state: AgentState) -> AgentState:
+    st.info("`search_meyhaneler_node` çalışıyor.")
     last_msg = state["messages"][-1]
     query = last_msg.content
+    st.info(f"Arama sorgusu: {query}")
 
     location = clean_location_query(query)
     state["location_query"] = location
+    st.info(f"Arama konumu belirlendi: {location}")
 
     try:
         # Arama sorgusunu iyileştir
         retrieval_query = f"{location} {query}" if location and location not in query.lower() else query
+        st.info(f"Retrieval sorgusu: {retrieval_query}")
         raw_results = retriever.invoke(retrieval_query, k=10) # Daha fazla sonuç alıp filtreleyelim
+        st.info(f"Retriever'dan {len(raw_results)} ham sonuç alındı.")
         filtered_results = []
 
         normalized_location = unicodedata.normalize('NFKD', location.lower()).encode('ascii', 'ignore').decode('utf-8')
@@ -397,9 +472,11 @@ def search_meyhaneler_node(state: AgentState) -> AgentState:
             # Eğer konum sorguda yer alıyorsa ve mekanın adresi veya adı bu konumu içeriyorsa ekle
             if normalized_location in address_lower or normalized_location in name_lower:
                 filtered_results.append(doc)
+        st.info(f"Konuma göre filtrelendikten sonra {len(filtered_results)} sonuç kaldı.")
 
         # Eğer filtrelemeden sonra hala sonuç yoksa veya ilk 3 sonuç yoksa daha geniş arama yap
         if not filtered_results or len(filtered_results) < 3:
+            st.info("Filtrelenmiş sonuçlar yetersiz, genel İstanbul araması yapılıyor.")
             # Sadece İstanbul için genel arama
             raw_results_istanbul = retriever.invoke(f"istanbul {query}", k=5)
             # Daha önce filtrelenmiş sonuçları da ekle, mükerrerleri önle
@@ -408,6 +485,7 @@ def search_meyhaneler_node(state: AgentState) -> AgentState:
                 if doc.metadata.get("Mekan Adı") not in seen_names:
                     filtered_results.append(doc)
                     seen_names.add(doc.metadata.get("Mekan Adı"))
+            st.info(f"Genel İstanbul araması sonrası toplam {len(filtered_results)} sonuç var.")
 
 
         if not filtered_results:
@@ -419,6 +497,7 @@ def search_meyhaneler_node(state: AgentState) -> AgentState:
 
             sanitized_fallback_message = sanitize_markdown(fallback_message)
             state["messages"].append(AIMessage(content=sanitized_fallback_message))
+            st.warning("Mekan bulunamadı, düşüş mesajı eklendi.")
             return state
 
         # Sadece ilk 5 sonucu göster
@@ -458,51 +537,65 @@ def search_meyhaneler_node(state: AgentState) -> AgentState:
 
         sanitized_content = sanitize_markdown("\n".join(formatted_results))
         state["messages"].append(AIMessage(content=sanitized_content))
+        st.success("Mekan arama sonuçları AIMessage olarak eklendi.")
         return state
     except Exception as e:
+        st.error(f"⚠️ Arama sırasında beklenmedik bir hata oluştu (search_meyhaneler_node): {str(e)}")
         print(f"DEBUG ERROR in search_meyhaneler_node: {e}")
         sanitized_error_message = sanitize_markdown(f"⚠️ Arama sırasında beklenmedik bir hata oluştu: {str(e)}")
         state["messages"].append(AIMessage(content=sanitized_error_message))
         return state
 
 def router_node(state: AgentState) -> AgentState:
+    st.info("`router_node` çalışıyor.")
     last_msg = state["messages"][-1]
     content = last_msg.content.lower()
+    st.info(f"Yönlendirme için son mesaj içeriği: {content}")
 
     if any(t in content for t in ["meyhane", "restoran", "kafe", "date", "randevu", "mekan", "öneri", "neresi", "yer", "yemek", "içki"]):
         state["next_node"] = "search"
+        st.info("Yönlendirme: search (mekan araması)")
     elif any(t in content for t in ["hava", "weather", "sıcaklık", "nem", "yağmur", "açık", "kapalı", "derece"]):
         state["next_node"] = "weather"
+        st.info("Yönlendirme: weather (hava durumu)")
     elif any(t in content for t in ["fun fact", "ilginç bilgi", "bilgi ver", "biliyor muydun", "merak", "gerçek"]):
         state["next_node"] = "fun_fact"
+        st.info("Yönlendirme: fun_fact (ilginç bilgi)")
     else:
         state["next_node"] = "general"
+        st.info("Yönlendirme: general (genel yanıt)")
         
     return state
 
 
 def fun_fact_node(state: AgentState) -> AgentState:
+    st.info("`fun_fact_node` çalışıyor.")
     try:
         fact = get_fun_fact()
         print(f"DEBUG: Fun fact retrieved: {fact}")
         sanitized_fact = sanitize_markdown(f"🤔 İlginç Bilgi: {fact}")
         state["messages"].append(AIMessage(content=sanitized_fact))
+        st.success("İlginç bilgi AIMessage olarak eklendi.")
     except Exception as e:
-        print(f"ERROR in fun_fact_node: {e}")
+        st.error(f"ERROR in fun_fact_node: {e}")
         error_msg = "⚠️ İlginç bilgi alınırken bir hata oluştu"
         state["messages"].append(AIMessage(content=sanitize_markdown(error_msg)))
+        st.warning("İlginç bilgi hatası AIMessage olarak eklendi.")
     return state
 
     
 def general_response_node(state: AgentState) -> AgentState:
+    st.info("`general_response_node` çalışıyor.")
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, openai_api_key=OPENAI_API_KEY)
 
     # Get the last human message
     human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
     if not human_messages:
+        st.warning("general_response_node: İnsan mesajı bulunamadı.")
         return state
 
     last_query = human_messages[-1].content.lower()
+    st.info(f"General response için son kullanıcı sorgusu: {last_query}")
 
     # Greeting triggers (expanded list)
     greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın", "hi", "alo", "hey", "slm", "heyatım", "hayatım"]
@@ -517,18 +610,23 @@ def general_response_node(state: AgentState) -> AgentState:
         ]
         chosen = random.choice(responses)
         state["messages"].append(AIMessage(content=sanitize_markdown(chosen)))
+        st.success("Selamlama yanıtı AIMessage olarak eklendi.")
         return state
 
     # If not a greeting, proceed with LLM
     try:
+        st.info("LLM çağrısı yapılıyor...")
         response = llm.invoke(state["messages"])
         if response and response.content:
+            st.success("LLM yanıtı alındı.")
             state["messages"].append(AIMessage(content=sanitize_markdown(response.content)))
         else:
+            st.warning("LLM'den boş veya geçersiz yanıt alındı.")
             fallback = "Merhaba! Size nasıl yardımcı olabilirim?"
             state["messages"].append(AIMessage(content=sanitize_markdown(fallback)))
 
     except Exception as e:
+        st.error(f"General response LLM çağrısında hata oluştu: {str(e)}")
         error_msg = f"Üzgünüm, bir hata oluştu: {str(e)}. Lütfen tekrar deneyin."
         state["messages"].append(AIMessage(content=sanitize_markdown(error_msg)))
 
@@ -536,6 +634,7 @@ def general_response_node(state: AgentState) -> AgentState:
 
 @st.cache_resource
 def create_workflow():
+    st.info("LangGraph iş akışı oluşturuluyor...")
     workflow = StateGraph(AgentState)
     workflow.add_node("add_system_message", add_system_message)
     workflow.add_node("router", router_node)
@@ -575,6 +674,7 @@ def create_workflow():
 
     memory = MemorySaver()
     graph = workflow.compile(checkpointer=memory)
+    st.success("LangGraph iş akışı başarıyla derlendi.")
 
     return graph
 
@@ -592,18 +692,23 @@ st.markdown(sanitize_markdown(
     "- `Bana ilginç bir bilgi verir misin?`"
 ))
 # API Anahtarlarının ayarlı olup olmadığını kontrol et
-if not st.secrets.get("OPENAI_API_KEY") or not st.secrets.get("OPENWEATHER_API_KEY"):
-    st.error("⚠️ API anahtarları eksik! Lütfen Streamlit Cloud kontrol panelinizdeki 'Secrets' kısmında `OPENAI_API_KEY` ve `OPENWEATHER_API_KEY` değişkenlerini ayarlayın.")
+if not st.secrets.get("OPENAI_API_KEY") or not st.secrets.get("OPENWEATHER_API_KEY") or not st.secrets.get("NEO4J_URI"):
+    st.error("⚠️ Gerekli API anahtarları veya Neo4j bağlantı bilgileri eksik! Lütfen Streamlit Cloud kontrol panelinizdeki 'Secrets' kısmında `OPENAI_API_KEY`, `OPENWEATHER_API_KEY`, `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD` değişkenlerini ayarlayın.")
     st.stop()
+else:
+    st.info("Tüm gerekli sırlar yüklendi.")
+
 
 # LangGraph'ı başlat (sadece bir kez)
 if "graph" not in st.session_state:
     st.session_state.graph = create_workflow()
 if "conversation_thread_id" not in st.session_state:
     st.session_state.conversation_thread_id = str(uuid.uuid4())
+    st.info(f"Yeni konuşma iş parçacığı ID'si: {st.session_state.conversation_thread_id}")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
+    st.info("Mesaj geçmişi başlatıldı.")
 
 # Display chat messages from history on app rerun
 for msg in st.session_state.messages:
@@ -612,6 +717,7 @@ for msg in st.session_state.messages:
 
 # Kullanıcıdan girdi al
 if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"):
+    st.info(f"Kullanıcı girdisi: {prompt}")
     # Kullanıcı mesajını geçmişe ekle ve görüntüle
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -624,6 +730,8 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
             langgraph_messages.append(HumanMessage(content=msg["content"]))
         elif msg["role"] == "assistant":
             langgraph_messages.append(AIMessage(content=msg["content"]))
+    st.info(f"LangGraph'a gönderilen toplam mesaj sayısı: {len(langgraph_messages)}")
+
 
     # LangGraph state'i oluştur
     current_state = {
@@ -632,6 +740,7 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
         "next_node": None,
         "location_query": None
     }
+    st.info(f"Başlangıç LangGraph state'i: {current_state}")
 
     thread_id = st.session_state.conversation_thread_id
 
@@ -643,34 +752,42 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
                 current_state,
                 config={"configurable": {"thread_id": thread_id}}
             ):
-                print(f"DEBUG: Graph step: {step}")
+                st.info(f"LangGraph adım sonucu: {step}")
                 
                 # Eğer bu adımda mesajlar varsa ve son mesaj AI tarafından oluşturulmuşsa
                 if "messages" in step and step["messages"]:
-                    last_message = step["messages"][-1]
+                    # Ensure it's the latest message appended by the current node
+                    last_message = step["messages"][-1] 
                     if isinstance(last_message, AIMessage):
                         latest_ai_content = last_message.content
-                        print(f"DEBUG: Found AI message: {latest_ai_content}")
+                        st.info(f"LangGraph'tan gelen son AIMessage içeriği: {latest_ai_content[:100]}...")
+                        # This append within the loop is crucial for progressive updates,
+                        # but in Streamlit we typically want the final answer.
+                        # We'll collect the last one.
 
             if latest_ai_content:
                 # Sanitize et ve ekle
                 sanitized_content = sanitize_markdown(latest_ai_content)
                 st.session_state.messages.append({"role": "assistant", "content": sanitized_content})
+                st.success("Asistan yanıtı başarılı.")
                 
                 # Yanıtı göster
                 with st.chat_message("assistant"):
                     st.markdown(sanitized_content, unsafe_allow_html=True)
             else:
                 # Fallback mesajı
-                error_msg = "Üzgünüm, bir yanıt üretemedim. Lütfen tekrar deneyin."
+                error_msg = "Üzgünüm, bir yanıt üretemedim. LangGraph akışı tamamlandı ancak AI mesajı bulunamadı. Lütfen tekrar deneyin."
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
                 with st.chat_message("assistant"):
                     st.markdown(error_msg)
+                st.error("LangGraph akışı AI mesajı üretmeden tamamlandı.")
+
 
         except Exception as e:
             error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin."
+            st.error(f"Ana döngüde beklenmedik hata: {str(e)}")
             print(f"ERROR in main loop: {str(e)}")
             st.session_state.messages.append({"role": "assistant", "content": error_message})
             with st.chat_message("assistant"):
                 st.markdown(error_message)
-                st.exception(e)
+                st.exception(e) # Display exception details in Streamlit for advanced debugging
