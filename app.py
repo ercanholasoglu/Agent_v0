@@ -766,7 +766,6 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
     with st.spinner("Düşünüyorum... 🤔"):
         try:
-            final_state_data = None # Start as None, will be populated by __end__
             latest_ai_message_content = None
 
             # LangGraph akışını başlat ve tüm çıktıları işle
@@ -776,39 +775,38 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
             ):
                 st.info(f"LangGraph adım sonucu: {chunk}")
                 
-                if "__end__" in chunk:
-                    final_state_data = chunk["__end__"]
-                    # Once __end__ is found, we have the complete final state.
-                    # We can break here as we only care about the final state.
-                    break 
+                # Iterate through all keys in the chunk (representing node outputs or __end__)
+                for node_name, node_output in chunk.items():
+                    if node_name == "__end__":
+                        # If it's the final state chunk, check its messages
+                        if "messages" in node_output:
+                            for msg in reversed(node_output["messages"]):
+                                if isinstance(msg, AIMessage) and msg.content:
+                                    latest_ai_message_content = msg.content
+                                    break # Found the latest AI message in the final state
+                        break # Processed __end__, no need to check other node_outputs in this chunk
+                    elif "messages" in node_output:
+                        # For intermediate node outputs, update if an AIMessage is found
+                        for msg in reversed(node_output["messages"]):
+                            if isinstance(msg, AIMessage) and msg.content:
+                                latest_ai_message_content = msg.content
+                                break # Found the latest AI message in this node's output, move to next node's output
 
-            # After the stream (or break), process the final_state_data
-            if final_state_data and "messages" in final_state_data and final_state_data["messages"]:
-                # Find the last AIMessage in the final collected state
-                for msg in reversed(final_state_data["messages"]):
-                    if isinstance(msg, AIMessage):
-                        latest_ai_message_content = msg.content
-                        break
 
-                if latest_ai_message_content:
-                    sanitized_content = sanitize_markdown(latest_ai_message_content)
-                    st.session_state.messages.append({"role": "assistant", "content": sanitized_content})
-                    st.success("Asistan yanıtı başarıyla eklendi.")
-                    
-                    with st.chat_message("assistant"):
-                        st.markdown(sanitized_content, unsafe_allow_html=True)
-                else:
-                    error_msg = "Üzgünüm, bir yanıt üretemedim. LangGraph akışı tamamlandı ancak AI mesajı bulunamadı. Lütfen tekrar deneyin."
-                    st.session_state.messages.append({"role": "assistant", "content": error_msg})
-                    with st.chat_message("assistant"):
-                        st.markdown(error_msg)
-                    st.error("LangGraph akışı AI mesajı üretmeden tamamlandı.")
+            # After the stream completes, use the latest_ai_message_content found
+            if latest_ai_message_content:
+                sanitized_content = sanitize_markdown(latest_ai_message_content)
+                st.session_state.messages.append({"role": "assistant", "content": sanitized_content})
+                st.success("Asistan yanıtı başarıyla eklendi.")
+                
+                with st.chat_message("assistant"):
+                    st.markdown(sanitized_content, unsafe_allow_html=True)
             else:
-                error_msg = "Üzgünüm, bir yanıt üretemedim. LangGraph akışı boş veya geçersiz bir durumla tamamlandı."
+                error_msg = "Üzgünüm, bir yanıt üretemedim. LangGraph akışı tamamlandı ancak AI mesajı bulunamadı. Lütfen tekrar deneyin."
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
                 with st.chat_message("assistant"):
                     st.markdown(error_msg)
-                st.error("LangGraph akışı boş veya geçersiz bir durumla tamamlandı.")
+                st.error("LangGraph akışı AI mesajı üretmeden tamamlandı.")
 
         except Exception as e:
             error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin."
