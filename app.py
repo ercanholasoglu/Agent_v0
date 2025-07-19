@@ -515,24 +515,9 @@ def general_response_node(state: AgentState) -> AgentState:
             "Nasılsın? İstanbul'da nereye gitmek istersin? Romantik bir mekan mı, meyhane mi? 🍷"
         ]
         chosen = random.choice(responses)
+        # DÜZELTME: State'i güncelle ve mesaj ekle
         state["messages"].append(AIMessage(content=sanitize_markdown(chosen)))
-        return state  # RETURN IMMEDIATELY AFTER GREETING
-
-    # If not greeting, proceed with LLM
-    try:
-        response = llm.invoke(state["messages"])
-        if response and response.content:
-            sanitized_content = sanitize_markdown(response.content)
-            state["messages"].append(AIMessage(content=sanitized_content))
-        else:
-            fallback = "Merhaba! Size nasıl yardımcı olabilirim?"
-            state["messages"].append(AIMessage(content=sanitize_markdown(fallback)))
-    except Exception as e:
-        error_msg = f"Üzgünüm, bir hata oluştu: {str(e)}. Lütfen tekrar deneyin."
-        state["messages"].append(AIMessage(content=sanitize_markdown(error_msg)))
-    
-    return state
-
+        return state
 
 @st.cache_resource
 def create_workflow():
