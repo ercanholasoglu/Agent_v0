@@ -220,7 +220,7 @@ def initialize_retriever():
         meyhaneler_listesi = [
             {"name": "Dummy Meyhane A", "address": "Dummy Adres A", "rating": 4.0, "review_count": 100, "map_link": "http://dummy.map.a", "phone": "000", "price_level": 2, "neo4j_element_id": "dummy-a"},
             {"name": "Dummy Meyhane B", "address": "Dummy Adres B", "rating": 4.5, "review_count": 250, "map_link": "http://dummy.map.b", "phone": "000", "price_level": 3, "neo4j_element_id": "dummy-b"},
-            {"name": "Dummy Meyhane C", "address": "Dummy Adres C", "rating": 3.8, "review_count": 50, "map_link": "http://dummy.map.c", "phone": "000", "price_level": 1, "neo4j_element_id": "dummy-c"},
+            {"name": "Dummy Meyhane C", "address": "Dummy Mekan C", "rating": 3.8, "review_count": 50, "map_link": "http://dummy.map.c", "phone": "000", "price_level": 1, "neo4j_element_id": "dummy-c"},
         ]
         st.info(f"Dummy veri kullanılıyor: {len(meyhaneler_listesi)} mekan.")
 
@@ -766,7 +766,7 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
     with st.spinner("Düşünüyorum... 🤔"):
         try:
-            final_state_data = {} # Initialize an empty dict to store the final state
+            final_state_data = None # Start as None, will be populated by __end__
             latest_ai_message_content = None
 
             # LangGraph akışını başlat ve tüm çıktıları işle
@@ -776,14 +776,13 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
             ):
                 st.info(f"LangGraph adım sonucu: {chunk}")
                 
-                # If the chunk contains the final state, update final_state_data
                 if "__end__" in chunk:
                     final_state_data = chunk["__end__"]
-                # Otherwise, if it's an intermediate state with messages, update messages in final_state_data
-                elif "messages" in chunk and chunk["messages"]:
-                    final_state_data["messages"] = chunk["messages"]
+                    # Once __end__ is found, we have the complete final state.
+                    # We can break here as we only care about the final state.
+                    break 
 
-            # After the stream, check the collected final_state_data
+            # After the stream (or break), process the final_state_data
             if final_state_data and "messages" in final_state_data and final_state_data["messages"]:
                 # Find the last AIMessage in the final collected state
                 for msg in reversed(final_state_data["messages"]):
