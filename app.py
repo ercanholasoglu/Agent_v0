@@ -555,16 +555,13 @@ def create_workflow():
     # st.success("LangGraph iş akışı başarıyla oluşturuldu.") # Removed for pop-up reduction
     return app
 
-st.set_page_config(page_title="The Light Passanger", layout="wide")
-st.title("The Light Passanger 📍")
+st.set_page_config(page_title="The Light Passenger", layout="wide")
+st.title("The Light Passenger 📍")
 
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Convert stored messages to BaseMessage objects if they are not already (for initial load)
-# This loop handles the case where messages were previously stored as dicts.
-# For new messages, we will store them as BaseMessage directly.
 for i, msg in enumerate(st.session_state.messages):
     if isinstance(msg, dict):
         if msg["role"] == "user":
@@ -573,11 +570,7 @@ for i, msg in enumerate(st.session_state.messages):
             st.session_state.messages[i] = AIMessage(content=msg["content"])
 
 
-# Display existing messages
 for message in st.session_state.messages:
-    # Use message.type for role (human, ai) and message.content for content
-    # LangChain messages have .type attribute for role.
-    # For display, we map 'human' to 'user' and 'ai' to 'assistant'.
     display_role = "user" if isinstance(message, HumanMessage) else "assistant"
     with st.chat_message(display_role):
         st.markdown(message.content, unsafe_allow_html=True)
