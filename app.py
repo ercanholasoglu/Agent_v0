@@ -743,11 +743,8 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
     # LangGraph için mesajları hazırla
     langgraph_messages = []
-    # Add SystemMessage at the beginning of LangGraph messages for each run if not already present
-    # This ensures the LLM always has the initial system prompt
-    if not any(isinstance(msg, SystemMessage) for msg in st.session_state.messages):
-         langgraph_messages.append(SystemMessage(content=SYSTEM_PROMPT))
-
+    # Only convert existing session_state messages for LangGraph input.
+    # The 'add_system_message' node in the graph handles prepending the SystemMessage.
     for msg in st.session_state.messages:
         if msg["role"] == "user":
             langgraph_messages.append(HumanMessage(content=msg["content"]))
@@ -821,5 +818,4 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
             st.session_state.messages.append({"role": "assistant", "content": error_message})
             with st.chat_message("assistant"):
                 st.markdown(error_message)
-                st.exception(e)   # Rerun the app to show the latest message
-    st.rerun()
+                st.exception(e)
