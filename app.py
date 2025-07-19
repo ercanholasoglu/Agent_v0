@@ -493,19 +493,20 @@ def fun_fact_node(state: AgentState) -> AgentState:
     state["messages"].append(AIMessage(content=sanitized_fact))
     return state
 
+    
 def general_response_node(state: AgentState) -> AgentState:
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, openai_api_key=OPENAI_API_KEY)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, openai_api_key=OPENAI_API_KEY) # API key'i burada da belirtin
 
     # Get the last human message
     human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
     if not human_messages:
-        return state
-        
+        return state # Eğer insan mesajı yoksa boş dön
+
     last_query = human_messages[-1].content.lower()
 
     # Greeting triggers (expanded list)
     greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın", "hi", "alo", "hey", "slm", "heyatım"]
-    
+
     # Check for greeting - return early if detected
     if any(g in last_query for g in greeting_triggers):
         responses = [
@@ -515,9 +516,23 @@ def general_response_node(state: AgentState) -> AgentState:
             "Nasılsın? İstanbul'da nereye gitmek istersin? Romantik bir mekan mı, meyhane mi? 🍷"
         ]
         chosen = random.choice(responses)
-        # DÜZELTME: State'i güncelle ve mesaj ekle
-        state["messages"].append(AIMessage(content=sanitize_markdown(chosen)))
-        return state
+        state["messages"].append(AIMessage(content=sanitize_markdown(chosen))) # Yanıtı sanitize et
+        return state # <--- BURADA RETURN YAPILMALI
+
+    # If not a greeting, proceed with LLM
+    try:
+        response = llm.invoke(state["messages"])
+        if response and response.content:
+            state["messages"].append(AIMessage(content=sanitize_markdown(response.content))) # LLM yanıtını da sanitize et
+        else:
+            fallback = "Merhaba! Size nasıl yardımcı olabilirim?"
+            state["messages"].append(AIMessage(content=sanitize_markdown(fallback)))
+
+    except Exception as e:
+        error_msg = f"Üzgünüm, bir hata oluştu: {str(e)}. Lütfen tekrar deneyin."
+        state["messages"].append(AIMessage(content=sanitize_markdown(error_msg))) # Hata mesajını da sanitize et
+
+    return state    
 
 @st.cache_resource
 def create_workflow():
@@ -599,28 +614,46 @@ for msg in st.session_state.messages:
         st.markdown(sanitize_markdown(msg["content"]))
 
 # Kullanıcıdan girdi al (SADECE BURADA OLMALI)
+# Kullanıcıdan girdi al (SADECE BURADA OLMALI)
 if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"):
     # Kullanıcı mesajını geçmişe ekle ve görüntüle
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.markdown(sanitize_markdown(prompt))
+        st.markdown(prompt) # Kullanıcı girdisini sanitize etmeyin
 
 
     # LangGraph'ı çalıştırma ve yanıt üretme
-    inputs = {"messages": [HumanMessage(content=prompt)]}
-
     thread_id = st.session_state.conversation_thread_id
 
     with st.spinner("Düşünüyorum... 🤔"):
         try:
+            # Streamlit'in session_state'indeki mesajları LangGraph'in anlayacağı BaseMessage formatına dönüştür
+            langgraph_messages = []
+            for msg in st.session_state.messages:
+                if msg["role"] == "user":
+                    langgraph_messages.append(HumanMessage(content=msg["content"]))
+                elif msg["role"] == "assistant":
+                    langgraph_messages.append(AIMessage(content=msg["content"]))
+
+            # Initial state'e tüm mevcut mesajları ekle
+            current_state_for_graph = {
+                "messages": langgraph_messages,
+                "last_recommended_place": None,
+                "next_node": None
+            }
+
             latest_ai_content = ""
-            for s in st.session_state.graph.stream(inputs, config={"configurable": {"thread_id": thread_id}}):
-                 print(f"DEBUG: Stream step: {s}") # Add this to see all streamed output
-                 if "__end__" not in s:
-                    ai_response_message = s.get("messages", [])[-1] if s.get("messages") else None
-                    if ai_response_message and isinstance(ai_response_message, AIMessage):
-                        latest_ai_content = ai_response_message.content
-                        print(f"DEBUG: Latest AI content from stream: {latest_ai_content}") # See content as it's built
+            # Stream'i current_state_for_graph ile başlat
+            for s in st.session_state.graph.stream(current_state_for_graph, config={"configurable": {"thread_id": thread_id}}):
+                print(f"DEBUG: Stream step: {s}") # Stream'deki her adımı görün
+                if "__end__" not in s:
+                    # En son AIMessage'ı al
+                    if "messages" in s:
+                        # LangGraph'in "messages" listesini her adımda tamamen döndürdüğünü varsayarsak
+                        # listenin son elemanını kontrol etmek genellikle yeterlidir.
+                        if s["messages"] and isinstance(s["messages"][-1], AIMessage):
+                            latest_ai_content = s["messages"][-1].content
+                            print(f"DEBUG: Latest AI content from stream: {latest_ai_content}") # Mesaj akışını görün
 
             if latest_ai_content:
                 sanitized_final_ai_response = sanitize_markdown(latest_ai_content)
@@ -631,7 +664,7 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
             st.session_state.messages.append({"role": "assistant", "content": sanitized_final_ai_response})
             with st.chat_message("assistant"):
-                st.markdown(sanitized_final_ai_response) # st.html yerine st.markdown kullanmaya devam edin
+                st.markdown(sanitized_final_ai_response)
 
         except Exception as e:
             error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin veya farklı bir soru sorun."
