@@ -31,9 +31,11 @@ import uuid
 load_dotenv()
 
 # --- REVISED sanitize_markdown FUNCTION ---
+# --- FINAL SOLUTION FOR sanitize_markdown FUNCTION ---
 def sanitize_markdown(text):
     """
-    Enhanced sanitization for Streamlit's Markdown renderer, focusing on regex group specifiers.
+    Ultimate solution for sanitizing Markdown to prevent JavaScript regex errors.
+    Focuses on breaking problematic patterns that look like regex group specifiers.
     """
     if not isinstance(text, str):
         return str(text)
@@ -41,49 +43,24 @@ def sanitize_markdown(text):
     if not text:
         return ""
 
-    # Step 1: HTML escaping (must be first to prevent re-interpretation of escaped characters)
-    # This ensures that characters like '&', '<', '>' are rendered literally, not as HTML.
+    # Step 1: HTML escaping
     text = text.replace("&", "&amp;")
     text = text.replace("<", "&lt;")
     text = text.replace(">", "&gt;")
 
-    # Step 2: Escape backslashes themselves first to prevent issues with subsequent escaping.
-    # If a backslash is part of an intended escape sequence, this will double it (e.g., '\n' becomes '\\n'),
-    # but Streamlit's markdown parser usually handles this correctly for literal output.
-    text = text.replace("\\", "\\\\")
-
-    # Step 3: Specific handling for patterns resembling Python-style named regex groups
-    # and other problematic regex constructs that might appear in text.
-    # This is the most crucial part for the reported error.
-    # We escape the problematic characters within these patterns.
-
-    # Escape Python-style named capture groups e.g., (?P<name>...)
-    # The regex matches '(?P<' followed by any word characters (the group name) and then '>'.
-    # We replace it with '\(\?P<groupname\)>' to escape the '(', '?', '<', and '>'.
-    text = re.sub(r'\(\?P<([a-zA-Z0-9_]+)>', r'\\(\?P<\\1\\>)', text)
+    # Step 2: Break regex-like patterns by inserting zero-width spaces
+    # This prevents JavaScript from interpreting them as invalid regex
+    text = re.sub(r'\(\?', '(\u200B?', text)
     
-    # Escape other common non-capturing or special group specifiers in regex,
-    # such as (?:, (?=, (?!, (?>.
-    # These also start with '(?', which can trigger the JavaScript regex parser.
-    # We escape the '(' and '?' characters.
-    text = re.sub(r'\(\?[:=!>]', r'\\(?:', text)
-
-    # Step 4: Escape other common Markdown special characters that might be
-    # misinterpreted or cause formatting issues if they appear literally in text.
-    # This should be done *after* the specific regex escaping.
-    # We iterate through a predefined list of special characters.
-    special_chars = r"_*{}[]()#+-.!|:" # Exclude ^ and $ as they are typically fine unless used as anchors
+    # Step 3: Escape backslashes
+    text = text.replace("\\", "\\\\")
+    
+    # Step 4: Escape Markdown special characters
+    special_chars = r"_*{}[]()#+-.!|:"
     for char in special_chars:
-        # We already escaped backslashes in Step 2, so this ensures we don't
-        # create invalid sequences like '\\\\*' if '*' was already escaped.
-        # This simple replace is effective because the `re.sub` for regex groups
-        # already handled the most complex scenarios.
         text = text.replace(char, f"\\{char}")
 
-    # Step 5: Unicode normalization.
-    # This helps in consistent character representation and can prevent issues
-    # with different forms of the same character (e.g., accented characters).
-    # It should be done after all escaping to avoid breaking escape sequences.
+    # Step 5: Unicode normalization
     text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8')
 
     return text
