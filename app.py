@@ -11,7 +11,7 @@ from langchain_community.vectorstores import InMemoryVectorStore
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from neo4j import GraphDatabase
-from dotenv import load_dotenv
+##from dotenv import load_dotenv
 from langchain_core.documents import Document
 from typing import List, Dict, Any 
 import re
@@ -29,17 +29,19 @@ import os
 import uuid
 
 
-load_dotenv() 
-
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")  
-OPENNWEATHER_API_KEY = os.environ["OPENWEATHER_API_KEY"]
-TAVILY_API_KEY = os.environ["TAVILY_API_KEY"]
-
-URI = os.environ.get("URI")
-USERNAME = os.environ.get("USERNAME")
-PASSWORD = os.environ.get("PASSWORD")
-
-
+try:
+    OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
+    OPENWEATHER_API_KEY = st.secrets["OPENWEATHER_API_KEY"]
+    TAVILY_API_KEY = st.secrets["TAVILY_API_KEY"] # If you use Tavily, ensure it's in secrets
+    URI = st.secrets["NEO4J_URI"]
+    USERNAME = st.secrets["NEO4J_USER"]
+    PASSWORD = st.secrets["NEO4J_PASSWORD"]
+    NEO4J_DATABASE = st.secrets.get("NEO4J_DATABASE", "neo4j") # Use .get with a default for optional secrets
+except KeyError as e:
+    st.error(f"Missing Streamlit secret: {e}. Please configure this in your Streamlit Cloud dashboard.")
+    st.stop() # Stop the app if essential secrets are missing
+    
+    
 def sanitize_markdown(text):
     if not isinstance(text, str):
         return str(text)
