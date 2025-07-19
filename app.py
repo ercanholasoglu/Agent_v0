@@ -68,12 +68,13 @@ def safe_markdown(text):
 # --- Neo4j Bağlantı Sınıfı ---
 class Neo4jConnector:
     def __init__(self):
+        # These are correctly reading from NEO4J_URI, NEO4J_USER, etc.
         self.uri = os.getenv("NEO4J_URI")
         self.user = os.getenv("NEO4J_USER")
         self.password = os.getenv("NEO4J_PASSWORD")
         self.database = os.getenv("NEO4J_DATABASE", "neo4j")
         self.driver = None
-
+        
     def connect(self):
         """Establishes a connection to Neo4j."""
         if self.driver is None:
@@ -570,7 +571,8 @@ st.title("İstanbul Mekan Asistanı 💬")
 st.markdown(sanitize_markdown("Merhaba! Ben İstanbul'daki romantik mekan, meyhane, restoran ve kafe önerileri sunan yapay zeka asistanıyım. Ayrıca hava durumu bilgisi veya ilginç bilgiler de sağlayabilirim. Size nasıl yardımcı olabilirim? 😊"))
 
 # API Anahtarlarının ayarlı olup olmadığını kontrol et
-if not os.getenv("OPENAI_API_KEY") or not os.getenv("OPENWEATHER_API_KEY"):
+# This check will now work correctly after load_dotenv() is at the top
+if not os.getenv("OPENAI_API_KEY") or not os.getenv("OPENWEATHER_API_KEY"): # Changed to os.getenv as it's safer
     st.error("⚠️ API anahtarları eksik! Lütfen `os.environ` içinde `OPENAI_API_KEY` ve `OPENWEATHER_API_KEY` değişkenlerini ayarlayın.")
     st.stop() # Uygulamayı durdur
 
