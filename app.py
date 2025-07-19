@@ -28,7 +28,6 @@ import random
 import os
 import uuid
 
-# Load secrets directly from Streamlit's secrets management
 try:
     OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
     OPENWEATHER_API_KEY = st.secrets["OPENWEATHER_API_KEY"]
@@ -37,23 +36,20 @@ try:
     USERNAME = st.secrets["NEO4J_USER"]
     PASSWORD = st.secrets["NEO4J_PASSWORD"]
     NEO4J_DATABASE = st.secrets.get("NEO4J_DATABASE", "neo4j")
-    st.success("API keys and Neo4j credentials loaded successfully from Streamlit secrets.")
+
 except KeyError as e:
-    st.error(f"Missing Streamlit secret: {e}. Please configure this in your Streamlit Cloud dashboard.")
+    st.error(f"Eksik Streamlit sırrı: {e}. Lütfen Streamlit Cloud kontrol panelinizde yapılandırın.")
     st.stop()
 
 
 def sanitize_markdown(text):
     if not isinstance(text, str):
-        st.warning(f"sanitize_markdown received non-string input: {type(text)} - {text}")
+
         return str(text)
     if not text:
         return ""
 
-    # HTML özel karakterleri
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    # Kaçırılması gereken Markdown karakterleri
     markdown_chars = ['\\', '*', '_', '~', '`', '#', '[', ']', '(', ')', '{', '}', '!', '^']
     for char in markdown_chars:
         text = text.replace(char, f"\\{char}")
@@ -63,21 +59,21 @@ def sanitize_markdown(text):
 
 def safe_markdown(text):
     try:
-        # Basitçe regex uyumluluğunu kontrol et
+
         re.compile(text)
         return text
     except re.error:
-        # Regex hatası varsa, tüm metni saf metin gibi göster
+
         return f"<pre>{text}</pre>"
 
-# --- Neo4j Bağlantı Sınıfı ---
+
 class Neo4jConnector:
     def __init__(self):
-        # These should now read from st.secrets directly
-        self.uri = st.secrets["NEO4J_URI"] # Corrected
-        self.user = st.secrets["NEO4J_USER"] # Corrected
-        self.password = st.secrets["NEO4J_PASSWORD"] # Corrected
-        self.database = st.secrets.get("NEO4J_DATABASE", "neo4j") # Corrected
+
+        self.uri = st.secrets["NEO4J_URI"] 
+        self.user = st.secrets["NEO4J_USER"] 
+        self.password = st.secrets["NEO4J_PASSWORD"] 
+        self.database = st.secrets.get("NEO4J_DATABASE", "neo4j")
         self.driver = None
 
     def connect(self):
@@ -87,7 +83,6 @@ class Neo4jConnector:
                 self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
                 with self.driver.session(database=self.database) as session:
                     session.run("RETURN 1")
-                st.info("Neo4j bağlantısı başarılı.")
             except Exception as exc:
                 st.error(f"Neo4j bağlantı hatası: {exc}")
                 raise ConnectionError(f"Neo4j bağlantı hatası: {exc}") from exc
@@ -97,7 +92,6 @@ class Neo4jConnector:
         if self.driver:
             self.driver.close()
             self.driver = None
-            st.info("Neo4j bağlantısı kapatıldı.")
 
 
     def get_meyhaneler(self, limit: int = 10000) -> List[Dict[str, Any]]:
@@ -123,7 +117,6 @@ class Neo4jConnector:
             with self.driver.session(database=self.database) as session:
                 result = session.run(query, limit=limit)
                 records = [self._clean_record(record) for record in result]
-                st.info(f"Neo4j'den {len(records)} mekan çekildi.")
                 return records
         except Exception as exc:
             st.error(f"Neo4j sorgu hatası (get_meyhaneler): {exc}")
@@ -158,7 +151,6 @@ class Neo4jConnector:
             "neo4j_element_id": neo4j_element_id,
         }
 
-# --- LangGraph State Tanımlaması ---
 def add_messages(left: List[BaseMessage], right: List[BaseMessage]) -> List[BaseMessage]:
     """Combines two lists of BaseMessage, used for state annotation."""
     return left + right
@@ -193,28 +185,26 @@ def process_documents(docs: List[Any]) -> List[Document]:
                 page_content=main_content,
                 metadata=metadata
             ))
-    st.info(f"LangChain için {len(processed)} doküman işlendi.")
+   
     return processed
 
-# --- Neo4j Verilerini Yükle ve Vektör Deposunu Oluştur (Sadece Bir Kez Çalıştır) ---
 @st.cache_resource
 def initialize_retriever():
-    st.info("Retriever başlatılıyor...")
     meyhaneler_listesi = []
     try:
         conn = Neo4jConnector()
         meyhaneler_listesi = conn.get_meyhaneler(limit=10000)
         conn.close()
         if not meyhaneler_listesi:
-            st.warning("Uyarı: Neo4j'den hiç mekan verisi çekilemedi. Retrieval boş sonuç dönebilir. Dummy veri kullanılıyor.")
+            st.warning("Uyarı: Neo4j'den hiç mekan verisi çekilemedi. Dummy veri kullanılıyor.")
             meyhaneler_listesi = [
                 {"name": "Dummy Meyhane A", "address": "Dummy Adres A", "rating": 4.0, "review_count": 100, "map_link": "http://dummy.map.a", "phone": "000", "price_level": 2, "neo4j_element_id": "dummy-a"},
                 {"name": "Dummy Meyhane B", "address": "Dummy Adres B", "rating": 4.5, "review_count": 250, "map_link": "http://dummy.map.b", "phone": "000", "price_level": 3, "neo4j_element_id": "dummy-b"},
                 {"name": "Dummy Meyhane C", "address": "Dummy Adres C", "rating": 3.8, "review_count": 50, "map_link": "http://dummy.map.c", "phone": "000", "price_level": 1, "neo4j_element_id": "dummy-c"},
             ]
-            st.info(f"Dummy veri kullanılıyor: {len(meyhaneler_listesi)} mekan.")
+
         else:
-            st.info(f"Neo4j'den gerçek veri kullanılıyor: {len(meyhaneler_listesi)} mekan.")
+            pass
     except Exception as e:
         st.error(f"Neo4j'den veri çekerken hata oluştu: {e}. Lütfen Neo4j sunucunuzun çalıştığından ve kimlik bilgilerinin doğru olduğundan emin olun. Dummy veri kullanılıyor.")
         meyhaneler_listesi = [
@@ -222,19 +212,18 @@ def initialize_retriever():
             {"name": "Dummy Meyhane B", "address": "Dummy Adres B", "rating": 4.5, "review_count": 250, "map_link": "http://dummy.map.b", "phone": "000", "price_level": 3, "neo4j_element_id": "dummy-b"},
             {"name": "Dummy Meyhane C", "address": "Dummy Mekan C", "rating": 3.8, "review_count": 50, "map_link": "http://dummy.map.c", "phone": "000", "price_level": 1, "neo4j_element_id": "dummy-c"},
         ]
-        st.info(f"Dummy veri kullanılıyor: {len(meyhaneler_listesi)} mekan.")
+
 
     processed_docs = process_documents(meyhaneler_listesi)
     try:
         vectorstore = InMemoryVectorStore.from_documents(
             documents=processed_docs,
-            embedding=OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY) # Pass API key explicitly
+            embedding=OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY) 
         )
         st.success("Vektör deposu başarıyla oluşturuldu.")
         return vectorstore.as_retriever(search_kwargs={"k": 5})
     except Exception as e:
         st.error(f"Vektör deposu oluşturulurken hata oluştu: {e}. OpenAI API anahtarınızı kontrol edin.")
-        # Return a dummy retriever to prevent crash
         class DummyRetriever:
             def invoke(self, query, k):
                 st.warning("Dummy retriever kullanılıyor. Gerçek arama yapılamıyor.")
@@ -243,7 +232,7 @@ def initialize_retriever():
 
 retriever = initialize_retriever()
 
-# --- LLM ve Prompt Tanımlamaları ---
+
 SYSTEM_PROMPT = """Sen İstanbul'da romantik mekan, meyhane, restoran ve kafe önerisi yapabilen bir AI asistanısın.
 Kullanıcıya Google haritalar bilgileriyle desteklenmiş, hava durumuyla uyumlu önerilerde bulunabilirsin.
 Gelen sorulara doğal, nazik ve samimi bir dille cevap ver ve tüm cevapların Türkçe olsun.
@@ -262,15 +251,12 @@ SUMMARY_PROMPT = ChatPromptTemplate.from_messages([
     MessagesPlaceholder(variable_name="messages"),
 ])
 
-# --- Yardımcı Fonksiyonlar ---
 @cached(TTLCache(maxsize=100, ttl=3600))
 def get_fun_fact() -> str:
-    st.info("İlginç bilgi alınıyor...")
     try:
         response = requests.get("https://uselessfacts.jsph.pl/api/v2/facts/random?language=tr", timeout=5)
-        response.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
+        response.raise_for_status() 
         fact = response.json().get("text", "İlginç bir bilgi bulunamadı.")
-        st.success(f"İlginç bilgi alındı: {fact[:50]}...")
         return fact
     except requests.exceptions.Timeout:
         st.error("İlginç bilgi servisi zaman aşımına uğradı.")
@@ -284,7 +270,6 @@ def get_fun_fact() -> str:
 
 def clean_location_query(query: str) -> str:
     normalized_query = unicodedata.normalize('NFKD', query.lower()).encode('ascii', 'ignore').decode('utf-8')
-    st.info(f"Konum sorgusu temizleniyor: '{query}' -> '{normalized_query}'")
 
     istanbul_locations = [
         r'etiler', r'levent', r'maslak', r'nisantasi', r'nisantaşi',
@@ -308,7 +293,6 @@ def clean_location_query(query: str) -> str:
     for loc_regex in istanbul_locations:
         match = re.search(r'\b' + loc_regex + r'\b', normalized_query)
         if match:
-            st.info(f"Konum bulundu (İstanbul): {match.group(0)}")
             return match.group(0)
 
     general_cities = [
@@ -320,17 +304,14 @@ def clean_location_query(query: str) -> str:
     for city_regex in general_cities:
         match = re.search(r'\b' + city_regex + r'\b', normalized_query)
         if match:
-            st.info(f"Konum bulundu (Genel Şehir): {match.group(0)}")
             return match.group(0)
 
-    st.info("Konum bulunamadı, 'istanbul' varsayılan olarak ayarlandı.")
     return "istanbul"
 
 weather_cache = TTLCache(maxsize=100, ttl=300)
 
 @cached(weather_cache)
 def get_openweather_forecast(location: str) -> Dict:
-    st.info(f"Hava durumu tahmini alınıyor: {location}")
     api_key = st.secrets.get("OPENWEATHER_API_KEY") # Corrected
     if not api_key:
         st.error("OpenWeather API anahtarı bulunamadı.")
@@ -346,15 +327,12 @@ def get_openweather_forecast(location: str) -> Dict:
             st.warning(f"'{location}' konumu için coğrafi veri bulunamadı.")
             return {"error": f"'{location}' konumu bulunamadı."}
         lat, lon = geo[0]["lat"], geo[0]["lon"]
-        st.info(f"Coğrafi koordinatlar: Lat={lat}, Lon={lon}")
-
         weather_response = requests.get(
             f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units=metric&lang=tr",
             timeout=10,
         )
         weather_response.raise_for_status()
         weather = weather_response.json()
-        st.success(f"{location} için hava durumu verisi başarıyla alındı.")
         return weather
     except requests.exceptions.RequestException as e:
         st.error(f"OpenWeather API hatası: {e}")
@@ -364,440 +342,236 @@ def get_openweather_forecast(location: str) -> Dict:
         return {"error": f"Beklenmedik bir hata oluştu: {e}"}
 
 def format_weather_response(location: str, data: Dict) -> str:
-    st.info(f"Hava durumu yanıtı formatlanıyor for {location}...")
     if "error" in data:
         st.error(f"Hava durumu formatlama hatası: {data['error']}")
         return f"❌ {data['error']}"
     try:
         lines = [f"🌤️ **{location.capitalize()} Hava Durumu Tahmini:**"]
         if "list" not in data or not data["list"]:
-            st.warning(f"{location.capitalize()} için hava durumu listesi boş.")
-            return f"❌ {location.capitalize()} için hava durumu tahmini bulunamadı."
+            st.warning("Hava durumu verisi eksik veya boş.")
+            return f"❌ {location} için hava durumu verisi bulunamadı."
 
-        for item in data.get("list", [])[:8]: # Sonraki 24 saat için (3 saatte bir)
-            dt = datetime.strptime(item["dt_txt"], "%Y-%m-%d %H:%M:%S")
+        today = datetime.now().date()
+        daily_forecasts = {}
+
+        for item in data["list"]:
+            timestamp = item["dt"]
+            forecast_time = datetime.fromtimestamp(timestamp)
+            forecast_date = forecast_time.date()
+
+            # Sadece bugünden sonraki veya bugünü kapsayan 5 günlük tahmini al
+            if forecast_date >= today and len(daily_forecasts) < 5:
+                date_str = "Bugün" if forecast_date == today else forecast_time.strftime("%d %B")
+                temp = item["main"]["temp"]
+                description = item["weather"][0]["description"]
+                icon_code = item["weather"][0]["icon"]
+                icon_url = f"http://openweathermap.org/img/wn/{icon_code}.png"
+
+                if forecast_date not in daily_forecasts:
+                    daily_forecasts[forecast_date] = {
+                        "date_str": date_str,
+                        "temps": [],
+                        "descriptions": set(),
+                        "icons": set()
+                    }
+                daily_forecasts[forecast_date]["temps"].append(temp)
+                daily_forecasts[forecast_date]["descriptions"].add(description)
+                daily_forecasts[forecast_date]["icons"].add(icon_url)
+
+        for date, forecast in daily_forecasts.items():
+            avg_temp = sum(forecast["temps"]) / len(forecast["temps"])
+            descriptions = ", ".join(list(forecast["descriptions"]))
             lines.append(
-                f"• {dt:%d/%m %H:%M}: "
-                f"{item['weather'][0]['description'].capitalize()}, "
-                f"Sıcaklık: {item['main']['temp']}°C, "
-                f"Hissedilen: {item['main']['feels_like']}°C, "
-                f"Nem: {item['main']['humidity']}%, "
-                f"Rüzgar: {item['wind']['speed']} m/s"
+                f"- **{forecast['date_str']}**: Sıcaklık: {avg_temp:.1f}°C, Durum: {descriptions.capitalize()}."
             )
-        formatted_string = "\n".join(lines)
-        st.success("Hava durumu yanıtı başarıyla formatlandı.")
-        return formatted_string
+
+        return "\n".join(lines)
     except Exception as e:
-        st.error(f"Hava durumu verisi işlenirken hata oluştu: {e}")
-        return f"❌ Hava durumu verisi işlenirken hata oluştu: {e}"
+        st.error(f"Hava durumu yanıtı formatlanırken beklenmedik hata: {e}")
+        return f"❌ Hava durumu bilgisi formatlanırken bir hata oluştu: {e}"
 
-# --- LangGraph Nodes ---
-def check_weather_node(state: AgentState) -> AgentState:
-    st.info("`check_weather_node` çalışıyor.")
-    last_msg = state["messages"][-1]
-    query = last_msg.content
+class Tools:
+    def __init__(self, llm_model, retriever):
+        self.llm_model = llm_model
+        self.retriever = retriever
 
-    location = state.get("location_query") or clean_location_query(query)
-    state["location_query"] = location
-    st.info(f"Hava durumu sorgulanacak konum: {location}")
 
-    formatted = format_weather_response(location, get_openweather_forecast(location))
+    def search_places(self, state: AgentState) -> List[Document]:
+        st.info("Mekan arama aracı çağrıldı...")
+        messages = state['messages']
+        query = messages[-1].content
+        clean_query = clean_location_query(query)
 
-    sanitized_formatted = sanitize_markdown(formatted)
-    state["messages"].append(AIMessage(content=sanitized_formatted))
-    st.success("Hava durumu yanıtı AIMessage olarak eklendi.")
-    return state
+        retrieved_docs = self.retriever.invoke(clean_query, k=5)
+        st.success(f"{len(retrieved_docs)} mekan bulundu.")
+        return retrieved_docs
 
-def add_system_message(state: AgentState) -> AgentState:
-    st.info("`add_system_message` çalışıyor.")
-    system_msg = SystemMessage(content=SYSTEM_PROMPT)
+    def get_weather_forecast(self, state: AgentState) -> str:
+        st.info("Hava durumu aracı çağrıldı...")
+        messages = state['messages']
+        query = messages[-1].content
+        location = clean_location_query(query) 
+        
+        weather_data = get_openweather_forecast(location)
+        formatted_weather = format_weather_response(location, weather_data)
+        st.success(f"{location} için hava durumu bilgisi çekildi.")
+        return formatted_weather
 
-    if not any(isinstance(msg, SystemMessage) for msg in state["messages"]):
-        st.info("Sistem mesajı eklendi.")
-        return {"messages": [system_msg] + state["messages"]}
-    else:
-        st.info("Sistem mesajı zaten mevcut.")
-        return state
+    def provide_fun_fact(self, state: AgentState) -> str:
+        st.info("İlginç bilgi aracı çağrıldı...")
+        return get_fun_fact()
 
-def summarize_conversation(state: AgentState) -> AgentState:
-    st.info("`summarize_conversation` çalışıyor.")
-    messages = state["messages"]
+    def generate_response(self, state: AgentState) -> str:
+        st.info("Yanıt oluşturma aracı çağrıldı...")
+        messages = state['messages']
 
-    if len(messages) > 5: # Konuşma belirli bir uzunluğu aşınca özetle
-        st.info(f"Sohbet özetleniyor, mesaj sayısı: {len(messages)}")
+        user_message_content = messages[-1].content
+        retrieved_docs = self.retriever.invoke(user_message_content, k=5) 
+
+        context_str = "\n".join([doc.page_content for doc in retrieved_docs])
+        if context_str:
+            st.info(f"Yanıt oluşturmak için {len(retrieved_docs)} doküman kullanılıyor.")
+            full_prompt = ChatPromptTemplate.from_messages([
+                ("system", SYSTEM_PROMPT + "\n\nKullanılabilecek ek bilgi/mekanlar:\n" + context_str),
+                MessagesPlaceholder(variable_name="messages"),
+            ])
+        else:
+            st.warning("Mekan önerisi için uygun doküman bulunamadı, genel prompt kullanılıyor.")
+            full_prompt = ChatPromptTemplate.from_messages([
+                ("system", SYSTEM_PROMPT),
+                MessagesPlaceholder(variable_name="messages"),
+            ])
+        
         try:
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3, openai_api_key=OPENAI_API_KEY) # Pass API key explicitly
-            chain = SUMMARY_PROMPT | llm
-            summary = chain.invoke({"messages": messages})
-            st.success("Sohbet başarıyla özetlendi.")
-            return {
-                "messages": [
-                    SystemMessage(content=SYSTEM_PROMPT),
-                    AIMessage(content=summary.content)
-                ]
-            }
+            response = self.llm_model.invoke(full_prompt.format_messages(messages=messages))
+            st.success("Yanıt başarıyla oluşturuldu.")
+            return response.content
+        except Exception as e:
+            st.error(f"Yanıt oluşturulurken hata oluştu: {e}")
+            return "Üzgünüm, şu an bir yanıt oluşturamıyorum."
+
+    def summarize_conversation(self, state: AgentState) -> str:
+        st.info("Sohbet özetleme aracı çağrıldı...")
+        messages = state['messages']
+        recent_messages = messages[-5:]
+        try:
+            summary_response = self.llm_model.invoke(SUMMARY_PROMPT.format_messages(messages=recent_messages))
+            st.success("Sohbet özeti oluşturuldu.")
+            return summary_response.content
         except Exception as e:
             st.error(f"Sohbet özetlenirken hata oluştu: {e}")
-            # Fallback to current messages if summarization fails
-            return state
-    else:
-        st.info("Sohbet özetlenmedi, mesaj sayısı 5'ten az.")
-        return state
+            return "Sohbet özetlenemedi."
 
-def search_meyhaneler_node(state: AgentState) -> AgentState:
-    st.info("`search_meyhaneler_node` çalışıyor.")
-    last_msg = state["messages"][-1]
-    query = last_msg.content
-    st.info(f"Arama sorgusu: {query}")
+    def route_question(self, state: AgentState) -> str:
+        st.info("Soru yönlendirme aracı çağrıldı...")
+        messages = state["messages"]
+        last_message = messages[-1]
 
-    location = clean_location_query(query)
-    state["location_query"] = location
-    st.info(f"Arama konumu belirlendi: {location}")
-
-    try:
-        # Arama sorgusunu iyileştir
-        retrieval_query = f"{location} {query}" if location and location not in query.lower() else query
-        st.info(f"Retrieval sorgusu: {retrieval_query}")
-        raw_results = retriever.invoke(retrieval_query, k=10) # Daha fazla sonuç alıp filtreleyelim
-        st.info(f"Retriever'dan {len(raw_results)} ham sonuç alındı.")
-        filtered_results = []
-
-        normalized_location = unicodedata.normalize('NFKD', location.lower()).encode('ascii', 'ignore').decode('utf-8')
-
-        # Konuma göre filtreleme
-        for doc in raw_results:
-            address_lower = unicodedata.normalize('NFKD', doc.metadata.get("Adres", "").lower()).encode('ascii', 'ignore').decode('utf-8')
-            name_lower = unicodedata.normalize('NFKD', doc.metadata.get("Mekan Adı", "").lower()).encode('ascii', 'ignore').decode('utf-8')
-
-            # Eğer konum sorguda yer alıyorsa ve mekanın adresi veya adı bu konumu içeriyorsa ekle
-            if normalized_location in address_lower or normalized_location in name_lower:
-                filtered_results.append(doc)
-        st.info(f"Konuma göre filtrelendikten sonra {len(filtered_results)} sonuç kaldı.")
-
-        # Eğer filtrelemeden sonra hala sonuç yoksa veya ilk 3 sonuç yoksa daha geniş arama yap
-        if not filtered_results or len(filtered_results) < 3:
-            st.info("Filtrelenmiş sonuçlar yetersiz, genel İstanbul araması yapılıyor.")
-            # Sadece İstanbul için genel arama
-            raw_results_istanbul = retriever.invoke(f"istanbul {query}", k=5)
-            # Daha önce filtrelenmiş sonuçları da ekle, mükerrerleri önle
-            seen_names = {doc.metadata.get("Mekan Adı") for doc in filtered_results}
-            for doc in raw_results_istanbul:
-                if doc.metadata.get("Mekan Adı") not in seen_names:
-                    filtered_results.append(doc)
-                    seen_names.add(doc.metadata.get("Mekan Adı"))
-            st.info(f"Genel İstanbul araması sonrası toplam {len(filtered_results)} sonuç var.")
-
-
-        if not filtered_results:
-            fallback_message = f"❌ Üzgünüm, **{location.capitalize()}** bölgesinde aradığınız kriterlere uygun bir mekan bulamadım."
-            if location == "istanbul":
-                fallback_message += " Veritabanımızda genel olarak İstanbul'da bu kriterlere uygun bir mekan bulamadım."
-            else:
-                fallback_message += " Belki aradığınız konumdaki verilerimiz eksiktir veya o bölgede kriterlerinize uyan bir yer yoktur. Lütfen farklı bir bölge veya daha genel bir arama yapmayı deneyin."
-
-            sanitized_fallback_message = sanitize_markdown(fallback_message)
-            state["messages"].append(AIMessage(content=sanitized_fallback_message))
-            st.warning("Mekan bulunamadı, düşüş mesajı eklendi.")
-            return state
-
-        # Sadece ilk 5 sonucu göster
-        formatted_results = []
-        for doc in filtered_results[:5]: # İlk 5 sonuçla sınırla
-            metadata = doc.metadata
-            name = metadata.get("Mekan Adı", "Bilinmeyen Mekan")
-            rating = float(metadata.get("Google Puanı", 0.0))
-            review_count = int(metadata.get("Google Yorum Sayısı", 0))
-            address = metadata.get("Adres", "Bilinmiyor")
-            map_link = metadata.get("Maps Linki", "")
-            phone = metadata.get("Telefon", "Yok")
-            price_level_raw = metadata.get("Fiyat Seviyesi", "Yok")
-
-            rating_display = f"⭐ {rating:.1f}" if rating > 0 else "⭐ Değerlendirilmemiş"
-            review_count_display = f"({review_count} yorum)" if review_count > 0 else "(Yorum yok)"
-            phone_display = f"📞 Telefon: {phone}" if phone and phone != "Yok" else ""
-
-            price_display = ""
-            if isinstance(price_level_raw, (int, float)):
-                price_display = f"💸 Fiyat Seviyesi: {'₺' * int(price_level_raw)}"
-            elif isinstance(price_level_raw, str) and price_level_raw.isdigit():
-                 price_display = f"💸 Fiyat Seviyesi: {'₺' * int(price_level_raw)}"
-            elif isinstance(price_level_raw, str) and price_level_raw != "Yok":
-                 price_display = f"💸 Fiyat Seviyesi: {price_level_raw}"
-
-            result_entry = (
-                f"🏠 **{name}**\n"
-                f"{rating_display} {review_count_display}\n"
-                f"📍 {address}\n"
-                f"{phone_display}\n"
-                f"{price_display}\n"
-                f"🔗 {map_link if map_link else 'Harita linki yok'}\n"
-                "――――――――――――――――――――"
-            )
-            formatted_results.append(result_entry)
-
-        sanitized_content = sanitize_markdown("Harika mekan önerilerim var:\n\n" + "\n".join(formatted_results))
-        state["messages"].append(AIMessage(content=sanitized_content))
-        st.success("Mekan arama sonuçları AIMessage olarak eklendi.")
-        return state
-    except Exception as e:
-        st.error(f"⚠️ Arama sırasında beklenmedik bir hata oluştu (search_meyhaneler_node): {str(e)}")
-        print(f"DEBUG ERROR in search_meyhaneler_node: {e}")
-        sanitized_error_message = sanitize_markdown(f"⚠️ Arama sırasında beklenmedik bir hata oluştu: {str(e)}")
-        state["messages"].append(AIMessage(content=sanitized_error_message))
-        return state
-
-def router_node(state: AgentState) -> AgentState:
-    st.info("`router_node` çalışıyor.")
-    last_msg = state["messages"][-1]
-    content = last_msg.content.lower()
-    st.info(f"Yönlendirme için son mesaj içeriği: {content}")
-
-    # Use a flag for greeting to decide next_node
-    greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın", "hi", "alo", "hey", "slm", "heyatım", "hayatım"]
-    if any(g in content for g in greeting_triggers):
-        state["next_node"] = "greeting" # New custom next_node for greetings
-        st.info("Yönlendirme: greeting (selamlama)")
-    elif any(t in content for t in ["meyhane", "restoran", "kafe", "date", "randevu", "mekan", "öneri", "neresi", "yer", "yemek", "içki"]):
-        state["next_node"] = "search"
-        st.info("Yönlendirme: search (mekan araması)")
-    elif any(t in content for t in ["hava", "weather", "sıcaklık", "nem", "yağmur", "açık", "kapalı", "derece"]):
-        state["next_node"] = "weather"
-        st.info("Yönlendirme: weather (hava durumu)")
-    elif any(t in content for t in ["fun fact", "ilginç bilgi", "bilgi ver", "biliyor muydun", "merak", "gerçek"]):
-        state["next_node"] = "fun_fact"
-        st.info("Yönlendirme: fun_fact (ilginç bilgi)")
-    else:
-        state["next_node"] = "general"
-        st.info("Yönlendirme: general (genel yanıt)")
+        if "hava" in last_message.content.lower() or "sıcaklık" in last_message.content.lower():
+            st.success("Hava durumu rotasına yönlendiriliyor.")
+            return "weather"
+        if "ilginç bilgi" in last_message.content.lower() or "bilgi ver" in last_message.content.lower():
+            st.success("İlginç bilgi rotasına yönlendiriliyor.")
+            return "fun_fact"
+        if "özetle" in last_message.content.lower() or "özet" in last_message.content.lower():
+            st.success("Özetleme rotasına yönlendiriliyor.")
+            return "summarize"
         
-    return state
+        place_keywords = ["mekan", "restoran", "kafe", "meyhane", "nereye gideyim", "öneri", "yer"]
+        if any(keyword in last_message.content.lower() for keyword in place_keywords):
+            st.success("Mekan arama rotasına yönlendiriliyor.")
+            return "search_places"
+
+        st.success("Genel yanıt rotasına yönlendiriliyor.")
+        return "generate_response" 
 
 
-def fun_fact_node(state: AgentState) -> AgentState:
-    st.info("`fun_fact_node` çalışıyor.")
-    try:
-        fact = get_fun_fact()
-        print(f"DEBUG: Fun fact retrieved: {fact}")
-        sanitized_fact = sanitize_markdown(f"🤔 İlginç Bilgi: {fact}")
-        state["messages"].append(AIMessage(content=sanitized_fact))
-        st.success("İlginç bilgi AIMessage olarak eklendi.")
-    except Exception as e:
-        st.error(f"ERROR in fun_fact_node: {e}")
-        error_msg = "⚠️ İlginç bilgi alınırken bir hata oluştu"
-        state["messages"].append(AIMessage(content=sanitize_markdown(error_msg)))
-        st.warning("İlginç bilgi hatası AIMessage olarak eklendi.")
-    return state
-
-    
-def general_response_node(state: AgentState) -> AgentState:
-    st.info("`general_response_node` çalışıyor.")
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, openai_api_key=OPENAI_API_KEY)
-
-    # Get the last human message
-    human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
-    if not human_messages:
-        st.warning("general_response_node: İnsan mesajı bulunamadı.")
-        # If no human message, return state and let the graph handle it
-        state["next_node"] = "end_conversation_due_to_no_human_message" # A custom state for this edge case
-        return state
-
-    last_query = human_messages[-1].content.lower()
-    st.info(f"General response için son kullanıcı sorgusu: {last_query}")
-
-    # Greeting triggers (expanded list) - This part is now handled by the router
-    # But as a fallback/redundancy, we can still have a basic check here.
-    greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın", "hi", "alo", "hey", "slm", "heyatım", "hayatım"]
-    is_greeting = any(g in last_query for g in greeting_triggers)
-
-    if is_greeting:
-        responses = [
-            "Merhaba! 👋 İstanbul'da romantik mekan, meyhane, restoran ya da kafe önerisi almak ister misin?",
-            "Selam! Size nasıl yardımcı olabilirim? Hava durumu bilgisi veya mekan önerisi alabilirsiniz. 🏙️",
-            "Günaydın! ☀️ Hangi mekan ya da hava durumu bilgisiyle yardımcı olayım?",
-            "Nasılsın? İstanbul'da nereye gitmek istersin? Romantik bir mekan mı, meyhane mi? 🍷"
-        ]
-        chosen = random.choice(responses)
-        state["messages"].append(AIMessage(content=sanitize_markdown(chosen)))
-        # For greetings, we can directly set next_node to indicate completion
-        state["next_node"] = "greeting_handled" # Indicate that a greeting was handled and can end
-        st.success("Selamlama yanıtı AIMessage olarak eklendi.")
-        return state
-
-    # If not a greeting, proceed with LLM
-    try:
-        st.info("LLM çağrısı yapılıyor...")
-        response = llm.invoke(state["messages"])
-        if response and response.content:
-            st.success("LLM yanıtı alındı.")
-            state["messages"].append(AIMessage(content=sanitize_markdown(response.content)))
-            state["next_node"] = "general_handled" # Indicate that a general response was handled
-        else:
-            st.warning("LLM'den boş veya geçersiz yanıt alındı.")
-            fallback = "Merhaba! Size nasıl yardımcı olabilirim?"
-            state["messages"].append(AIMessage(content=sanitize_markdown(fallback)))
-            state["next_node"] = "general_handled" # Fallback, then indicate handled
-    except Exception as e:
-        st.error(f"General response LLM çağrısında hata oluştu: {str(e)}")
-        error_msg = f"Üzgünüm, bir hata oluştu: {str(e)}. Lütfen tekrar deneyin."
-        state["messages"].append(AIMessage(content=sanitize_markdown(error_msg)))
-        state["next_node"] = "general_handled" # On error, indicate handled
-
-    return state  # CRITICAL: Return state after processing
-
-@st.cache_resource
 def create_workflow():
     st.info("LangGraph iş akışı oluşturuluyor...")
     workflow = StateGraph(AgentState)
-    workflow.add_node("add_system_message", add_system_message)
-    workflow.add_node("router", router_node)
-    workflow.add_node("search", search_meyhaneler_node)
-    workflow.add_node("weather", check_weather_node)
-    workflow.add_node("general", general_response_node)
-    workflow.add_node("fun_fact", fun_fact_node)
-    workflow.add_node("summarize", summarize_conversation)
 
-    workflow.add_edge(START, "add_system_message")
-    workflow.add_edge("add_system_message", "router")
+    llm = ChatOpenAI(model="gpt-4o", temperature=0, openai_api_key=OPENAI_API_KEY)
+    tools = Tools(llm_model=llm, retriever=retriever)
+
+    workflow.add_node("route_question", tools.route_question)
+    workflow.add_node("search_places", tools.search_places)
+    workflow.add_node("get_weather_forecast", tools.get_weather_forecast)
+    workflow.add_node("provide_fun_fact", tools.provide_fun_fact)
+    workflow.add_node("generate_response", tools.generate_response)
+    workflow.add_node("summarize_conversation", tools.summarize_conversation)
+
+    workflow.set_entry_point("route_question")
 
     workflow.add_conditional_edges(
-        "router",
-        lambda state: state["next_node"],
+        "route_question",
+        lambda state: state["next_node"] if state.get("next_node") else state["messages"][-1].content, # HACK: Use content for routing
         {
-            "search": "search",
-            "weather": "weather",
-            "general": "general",
-            "fun_fact": "fun_fact",
-            "greeting": "general", # Router will send greetings to general node
-        }
+            "search_places": "search_places",
+            "weather": "get_weather_forecast",
+            "fun_fact": "provide_fun_fact",
+            "summarize": "summarize_conversation",
+            "generate_response": "generate_response",
+        },
     )
 
-    # All specific nodes (search, weather, fun_fact) should now go to END
-    workflow.add_edge("search", END)
-    workflow.add_edge("weather", END)
-    workflow.add_edge("fun_fact", END)
-
-    # General node now explicitly handles its own ending based on the 'next_node' it sets
-    workflow.add_conditional_edges(
-        "general",
-        lambda state: state.get("next_node", "general_handled"), # Default to general_handled if not set
-        {
-            "greeting_handled": END, # If it was a greeting, end
-            "general_handled": END,  # If it was a general LLM response, end
-            "end_conversation_due_to_no_human_message": END # If no human message, end
-        }
-    )
-
-    # The summarize node always ends the turn for now. If you want more complex summarization flow, adjust this.
-    workflow.add_edge("summarize", END)
+    workflow.add_edge("search_places", "generate_response")
+    workflow.add_edge("get_weather_forecast", "generate_response")
+    workflow.add_edge("provide_fun_fact", "generate_response")
+    workflow.add_edge("summarize_conversation", "generate_response")
+    
+    workflow.add_edge("generate_response", END)
 
     memory = MemorySaver()
-    graph = workflow.compile(checkpointer=memory)
-    st.success("LangGraph iş akışı başarıyla derlendi.")
+    app = workflow.compile(checkpointer=memory)
+    st.success("LangGraph iş akışı başarıyla oluşturuldu.")
+    return app
 
-    return graph
+# --- Streamlit Uygulaması ---
+st.set_page_config(page_title="İstanbul Mekan Asistanı", layout="wide")
+st.title("İstanbul Mekan ve Hava Durumu Asistanı 📍")
 
-# --- STREAMLIT UYGULAMASI ---
-st.set_page_config(page_title="The Light Passanger 💬", page_icon="🌃")
-
-# In your Streamlit UI code:
-st.title("İstanbul Mekan Asistanı 💬")
-st.markdown(sanitize_markdown(
-    "Merhaba! Ben İstanbul'daki romantik mekan, meyhane, restoran ve kafe önerileri sunan yapay zeka asistanıyım. "
-    "Size nasıl yardımcı olabilirim? 😊\n\n"
-    "Örnek sorular:\n"
-    "- `Selam! Beşiktaş'ta romantik bir mekan önerebilir misin?`\n"
-    "- `Kadıköy'de hava durumu nasıl?`\n"
-    "- `Bana ilginç bir bilgi verir misin?`"
-))
-# API Anahtarlarının ayarlı olup olmadığını kontrol et
-if not st.secrets.get("OPENAI_API_KEY") or not st.secrets.get("OPENWEATHER_API_KEY") or not st.secrets.get("NEO4J_URI"):
-    st.error("⚠️ Gerekli API anahtarları veya Neo4j bağlantı bilgileri eksik! Lütfen Streamlit Cloud kontrol panelinizdeki 'Secrets' kısmında `OPENAI_API_KEY`, `OPENWEATHER_API_KEY`, `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD` değişkenlerini ayarlayın.")
-    st.stop()
-else:
-    st.info("Tüm gerekli sırlar yüklendi.")
-
-
-# LangGraph'ı başlat (sadece bir kez)
-if "graph" not in st.session_state:
-    st.session_state.graph = create_workflow()
-if "conversation_thread_id" not in st.session_state:
-    st.session_state.conversation_thread_id = str(uuid.uuid4())
-    st.info(f"Yeni konuşma iş parçacığı ID'si: {st.session_state.conversation_thread_id}")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
-    st.info("Mesaj geçmişi başlatıldı.")
 
-# Display chat messages from history on app rerun
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(sanitize_markdown(msg["content"]))
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"], unsafe_allow_html=True)
 
-# Kullanıcıdan girdi al
-if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"):
-    st.info(f"Kullanıcı girdisi: {prompt}")
-    # Kullanıcı mesajını geçmişe ekle ve görüntüle
+
+if prompt := st.chat_input("Nasıl yardımcı olabilirim?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.markdown(prompt)  # Kullanıcı girdisini sanitize etmeyin
+        st.markdown(prompt)
 
-    # LangGraph için mesajları hazırla
-    langgraph_messages = []
-    # Only convert existing session_state messages for LangGraph input.
-    # The 'add_system_message' node in the graph handles prepending the SystemMessage.
-    for msg in st.session_state.messages:
-        if msg["role"] == "user":
-            langgraph_messages.append(HumanMessage(content=msg["content"]))
-        elif msg["role"] == "assistant":
-            langgraph_messages.append(AIMessage(content=msg["content"]))
-    st.info(f"LangGraph'a gönderilen toplam mesaj sayısı: {len(langgraph_messages)}")
+    with st.spinner("Yanıt oluşturuluyor..."):
+        app = create_workflow()
+        
 
+        if "conversation_thread_id" not in st.session_state:
+            st.session_state.conversation_thread_id = str(uuid.uuid4())
+            
+        
+        config = {"configurable": {"thread_id": st.session_state.conversation_thread_id}}
 
-    # LangGraph state'i oluştur
-    current_state = {
-        "messages": langgraph_messages,
-        "last_recommended_place": None,
-        "next_node": None,
-        "location_query": None
-    }
-    st.info(f"Başlangıç LangGraph state'i: {current_state}")
+        response_placeholder = st.empty() 
+        latest_ai_message_content = ""
 
-    thread_id = st.session_state.conversation_thread_id
-
-    with st.spinner("Düşünüyorum... 🤔"):
         try:
-            latest_ai_message_content = None
-
-            # LangGraph akışını başlat ve tüm çıktıları işle
-            for chunk in st.session_state.graph.stream(
-                current_state,
-                config={"configurable": {"thread_id": thread_id}}
-            ):
-                st.info(f"LangGraph adım sonucu: {chunk}")
-                
-                # Iterate through all keys in the chunk (representing node outputs or __end__)
-                for node_name, node_output in chunk.items():
-                    if node_name == "__end__":
-                        # If it's the final state chunk, check its messages
-                        if "messages" in node_output:
-                            for msg in reversed(node_output["messages"]):
-                                if isinstance(msg, AIMessage) and msg.content:
-                                    latest_ai_message_content = msg.content
-                                    break # Found the latest AI message in the final state
-                        break # Processed __end__, no need to check other node_outputs in this chunk
-                    elif "messages" in node_output:
-                        # For intermediate node outputs, update if an AIMessage is found
+            for s in app.stream({"messages": [HumanMessage(content=prompt)]}, config=config):
+                for key in s:
+                    node_output = s[key]
+                    if "messages" in node_output:
                         for msg in reversed(node_output["messages"]):
                             if isinstance(msg, AIMessage) and msg.content:
                                 latest_ai_message_content = msg.content
-                                break # Found the latest AI message in this node's output, move to next node's output
+                                break 
 
 
-            # After the stream completes, use the latest_ai_message_content found
+ 
             if latest_ai_message_content:
                 sanitized_content = sanitize_markdown(latest_ai_message_content)
                 st.session_state.messages.append({"role": "assistant", "content": sanitized_content})
-                st.success("Asistan yanıtı başarıyla eklendi.")
                 
                 with st.chat_message("assistant"):
                     st.markdown(sanitized_content, unsafe_allow_html=True)
@@ -815,4 +589,5 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
             st.session_state.messages.append({"role": "assistant", "content": error_message})
             with st.chat_message("assistant"):
                 st.markdown(error_message)
-                st.exception(e)
+                st.exception(e)  
+    st.rerun()
