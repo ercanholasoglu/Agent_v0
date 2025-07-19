@@ -495,44 +495,37 @@ def fun_fact_node(state: AgentState) -> AgentState:
 
     
 def general_response_node(state: AgentState) -> AgentState:
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, openai_api_key=OPENAI_API_KEY) # API key'i burada da belirtin
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
 
-    # Get the last human message
-    human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
-    if not human_messages:
-        return state # Eğer insan mesajı yoksa boş dön
-
-    last_query = human_messages[-1].content.lower()
-
-    # Greeting triggers (expanded list)
-    greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın", "hi", "alo", "hey", "slm", "heyatım"]
-
-    # Check for greeting - return early if detected
-    if any(g in last_query for g in greeting_triggers):
-        responses = [
-            "Merhaba! 👋 İstanbul'da romantik mekan, meyhane, restoran ya da kafe önerisi almak ister misin?",
-            "Selam! Size nasıl yardımcı olabilirim? Hava durumu bilgisi veya mekan önerisi alabilirsiniz. 🏙️",
-            "Günaydın! ☀️ Hangi mekan ya da hava durumu bilgisiyle yardımcı olayım?",
-            "Nasılsın? İstanbul'da nereye gitmek istersin? Romantik bir mekan mı, meyhane mi? 🍷"
-        ]
-        chosen = random.choice(responses)
-        state["messages"].append(AIMessage(content=sanitize_markdown(chosen))) # Yanıtı sanitize et
-        return state # <--- BURADA RETURN YAPILMALI
-
-    # If not a greeting, proceed with LLM
     try:
+        human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
+        if human_messages:
+            last_query = human_messages[-1].content.lower()
+
+            # Karşılama mesajları
+            greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın"]
+            if any(g in last_query for g in greeting_triggers):
+                responses = [
+                    "Merhaba! İstanbul'da romantik mekan, meyhane, restoran ya da kafe önerisi almak istiyor musun?",
+                    "Selam! Size nasıl yardımcı olabilirim? Hava durumu bilgisi veya mekan önerisi alabilirsiniz.",
+                    "Günaydın! Hangi mekan ya da hava durumu bilgisiyle yardımcı olayım?",
+                    "Nasılsın? İstanbul'da nereye gitmek istersin? Romantik bir mekan mı, meyhane mi?"
+                ]
+                chosen = random.choice(responses)
+                state["messages"].append(AIMessage(content=chosen))
+                return state
+
         response = llm.invoke(state["messages"])
-        if response and response.content:
-            state["messages"].append(AIMessage(content=sanitize_markdown(response.content))) # LLM yanıtını da sanitize et
+        if response and hasattr(response, "content") and response.content:
+            state["messages"].append(AIMessage(content=response.content))
         else:
-            fallback = "Merhaba! Size nasıl yardımcı olabilirim?"
-            state["messages"].append(AIMessage(content=sanitize_markdown(fallback)))
-
+            state["messages"].append(AIMessage(content="Merhaba! Size nasıl yardımcı olabilirim?"))
+    
     except Exception as e:
-        error_msg = f"Üzgünüm, bir hata oluştu: {str(e)}. Lütfen tekrar deneyin."
-        state["messages"].append(AIMessage(content=sanitize_markdown(error_msg))) # Hata mesajını da sanitize et
+        state["messages"].append(AIMessage(content=f"⚠️ Hata: {str(e)}"))
 
-    return state    
+    return state
+
 
 @st.cache_resource
 def create_workflow():
