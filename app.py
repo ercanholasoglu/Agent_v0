@@ -205,7 +205,7 @@ def initialize_retriever():
             documents=processed_docs,
             embedding=OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
         )
-        st.success("Vektör deposu başarıyla oluşturuldu.")
+        # st.success("Vektör deposu başarıyla oluşturuldu.")
         return vectorstore.as_retriever(search_kwargs={"k": 5})
     except Exception as e:
         st.error(f"Vektör deposu oluşturulurken hata oluştu: {e}. OpenAI API anahtarınızı kontrol edin.")
@@ -380,7 +380,7 @@ class Tools:
         self.retriever = retriever
 
 
-    def search_places(self, state: AgentState) -> List[Document]:
+    def search_places(self, state: AgentState) -> AgentState:
         st.info("Mekan arama aracı çağrıldı...")
         messages = state['messages']
         query = messages[-1].content
@@ -388,9 +388,13 @@ class Tools:
 
         retrieved_docs = self.retriever.invoke(clean_query, k=5)
         st.success(f"{len(retrieved_docs)} mekan bulundu.")
-        return retrieved_docs
+        
+        formatted_docs = "\n".join([f"- Mekan Adı: {doc.metadata.get('Mekan Adı', 'Bilinmiyor')}, Adres: {doc.metadata.get('Adres', 'Bilinmiyor')}, Google Puanı: {doc.metadata.get('Google Puanı', '0.0')}, Yorum Sayısı: {doc.metadata.get('Google Yorum Sayısı', '0')}, Fiyat Seviyesi: {doc.metadata.get('Fiyat Seviyesi', 'Yok')}" for doc in retrieved_docs])
+        tool_output_message = f"Bulunan mekanlar:\n{formatted_docs}"
+        
+        return {"messages": [SystemMessage(content=tool_output_message)]}
 
-    def get_weather_forecast(self, state: AgentState) -> str:
+    def get_weather_forecast(self, state: AgentState) -> AgentState:
         st.info("Hava durumu aracı çağrıldı...")
         messages = state['messages']
         query = messages[-1].content
@@ -399,54 +403,59 @@ class Tools:
         weather_data = get_openweather_forecast(location)
         formatted_weather = format_weather_response(location, weather_data)
         st.success(f"{location} için hava durumu bilgisi çekildi.")
-        return formatted_weather
+        
+        return {"messages": [SystemMessage(content=formatted_weather)]}
 
-    def provide_fun_fact(self, state: AgentState) -> str:
+    def provide_fun_fact(self, state: AgentState) -> AgentState:
         st.info("İlginç bilgi aracı çağrıldı...")
-        return get_fun_fact()
+        fun_fact = get_fun_fact()
+        return {"messages": [SystemMessage(content=fun_fact)]}
 
-    def generate_response(self, state: AgentState) -> str:
+    def generate_response(self, state: AgentState) -> AgentState:
         st.info("Yanıt oluşturma aracı çağrıldı...")
         messages = state['messages']
+
+        llm_messages = []
+        llm_messages.append(SystemMessage(content=SYSTEM_PROMPT))
+        llm_messages.extend(messages)
 
         user_message_content = messages[-1].content
         retrieved_docs = self.retriever.invoke(user_message_content, k=5)
 
         context_str = "\n".join([doc.page_content for doc in retrieved_docs])
+        
         if context_str:
+            llm_messages.append(SystemMessage(content=f"Kullanılabilecek ek bilgi/mekanlar:\n{context_str}"))
             st.info(f"Yanıt oluşturmak için {len(retrieved_docs)} doküman kullanılıyor.")
-            full_prompt = ChatPromptTemplate.from_messages([
-                ("system", SYSTEM_PROMPT + "\n\nKullanılabilecek ek bilgi/mekanlar:\n" + context_str),
-                MessagesPlaceholder(variable_name="messages"),
-            ])
         else:
             st.warning("Mekan önerisi için uygun doküman bulunamadı, genel prompt kullanılıyor.")
-            full_prompt = ChatPromptTemplate.from_messages([
-                ("system", SYSTEM_PROMPT),
-                MessagesPlaceholder(variable_name="messages"),
-            ])
+        
+        full_prompt = ChatPromptTemplate.from_messages([
+            MessagesPlaceholder(variable_name="messages"),
+        ])
         
         try:
-            response = self.llm_model.invoke(full_prompt.format_messages(messages=messages))
+            response = self.llm_model.invoke(full_prompt.format_messages(messages=llm_messages))
             st.success("Yanıt başarıyla oluşturuldu.")
-            return response.content
+            return {"messages": [AIMessage(content=response.content)]}
         except Exception as e:
             st.error(f"Yanıt oluşturulurken hata oluştu: {e}")
-            return "Üzgünüm, şu an bir yanıt oluşturamıyorum."
+            return {"messages": [AIMessage(content="Üzgünüm, şu an bir yanıt oluşturamıyorum.")]}
 
-    def summarize_conversation(self, state: AgentState) -> str:
+
+    def summarize_conversation(self, state: AgentState) -> AgentState:
         st.info("Sohbet özetleme aracı çağrıldı...")
         messages = state['messages']
         recent_messages = messages[-5:]
         try:
             summary_response = self.llm_model.invoke(SUMMARY_PROMPT.format_messages(messages=recent_messages))
             st.success("Sohbet özeti oluşturuldu.")
-            return summary_response.content
+            return {"messages": [SystemMessage(content=summary_response.content)]}
         except Exception as e:
             st.error(f"Sohbet özetlenirken hata oluştu: {e}")
-            return "Sohbet özetlenemedi."
+            return {"messages": [SystemMessage(content="Sohbet özetlenemedi.")]}
 
-    def route_question(self, state: AgentState) -> AgentState: # Değişiklik burada
+    def route_question(self, state: AgentState) -> AgentState:
         st.info("Soru yönlendirme aracı çağrıldı...")
         messages = state["messages"]
         last_message = messages[-1]
@@ -471,8 +480,8 @@ class Tools:
                 st.success("Genel yanıt rotasına yönlendiriliyor.")
                 next_node_decision = "generate_response"
         
-        state["next_node"] = next_node_decision # Durumu güncelle
-        return state # Güncellenmiş durumu döndür
+        state["next_node"] = next_node_decision
+        return state
 
 
 def create_workflow():
@@ -493,7 +502,7 @@ def create_workflow():
 
     workflow.add_conditional_edges(
         "route_question",
-        lambda state: state["next_node"], # Buradaki mantık da değiştirildi
+        lambda state: state["next_node"],
         {
             "search_places": "search_places",
             "weather": "get_weather_forecast",
@@ -515,8 +524,8 @@ def create_workflow():
     st.success("LangGraph iş akışı başarıyla oluşturuldu.")
     return app
 
-st.set_page_config(page_title="The Light Passanger", layout="wide")
-st.title("The Light Passanger 📍")
+st.set_page_config(page_title="İstanbul Mekan Asistanı", layout="wide")
+st.title("İstanbul Mekan ve Hava Durumu Asistanı 📍")
 
 
 if "messages" not in st.session_state:
