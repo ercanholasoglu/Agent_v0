@@ -610,7 +610,7 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
             st.session_state.messages.append({"role": "assistant", "content": sanitized_final_ai_response})
             with st.chat_message("assistant"):
-                st.html(sanitize_markdown(latest_ai_content))
+                st.markdown(sanitized_final_ai_response)
 
         except Exception as e:
             error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin veya farklı bir soru sorun."
