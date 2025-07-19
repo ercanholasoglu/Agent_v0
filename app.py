@@ -446,28 +446,33 @@ class Tools:
             st.error(f"Sohbet özetlenirken hata oluştu: {e}")
             return "Sohbet özetlenemedi."
 
-    def route_question(self, state: AgentState) -> str:
+    def route_question(self, state: AgentState) -> AgentState: # Değişiklik burada
         st.info("Soru yönlendirme aracı çağrıldı...")
         messages = state["messages"]
         last_message = messages[-1]
+        
+        next_node_decision = ""
 
         if "hava" in last_message.content.lower() or "sıcaklık" in last_message.content.lower():
             st.success("Hava durumu rotasına yönlendiriliyor.")
-            return "weather"
-        if "ilginç bilgi" in last_message.content.lower() or "bilgi ver" in last_message.content.lower():
+            next_node_decision = "weather"
+        elif "ilginç bilgi" in last_message.content.lower() or "bilgi ver" in last_message.content.lower():
             st.success("İlginç bilgi rotasına yönlendiriliyor.")
-            return "fun_fact"
-        if "özetle" in last_message.content.lower() or "özet" in last_message.content.lower():
+            next_node_decision = "fun_fact"
+        elif "özetle" in last_message.content.lower() or "özet" in last_message.content.lower():
             st.success("Özetleme rotasına yönlendiriliyor.")
-            return "summarize"
+            next_node_decision = "summarize"
+        else:
+            place_keywords = ["mekan", "restoran", "kafe", "meyhane", "nereye gideyim", "öneri", "yer"]
+            if any(keyword in last_message.content.lower() for keyword in place_keywords):
+                st.success("Mekan arama rotasına yönlendiriliyor.")
+                next_node_decision = "search_places"
+            else:
+                st.success("Genel yanıt rotasına yönlendiriliyor.")
+                next_node_decision = "generate_response"
         
-        place_keywords = ["mekan", "restoran", "kafe", "meyhane", "nereye gideyim", "öneri", "yer"]
-        if any(keyword in last_message.content.lower() for keyword in place_keywords):
-            st.success("Mekan arama rotasına yönlendiriliyor.")
-            return "search_places"
-
-        st.success("Genel yanıt rotasına yönlendiriliyor.")
-        return "generate_response"
+        state["next_node"] = next_node_decision # Durumu güncelle
+        return state # Güncellenmiş durumu döndür
 
 
 def create_workflow():
@@ -488,7 +493,7 @@ def create_workflow():
 
     workflow.add_conditional_edges(
         "route_question",
-        lambda state: state["next_node"] if state.get("next_node") else state["messages"][-1].content,
+        lambda state: state["next_node"], # Buradaki mantık da değiştirildi
         {
             "search_places": "search_places",
             "weather": "get_weather_forecast",
@@ -510,8 +515,8 @@ def create_workflow():
     st.success("LangGraph iş akışı başarıyla oluşturuldu.")
     return app
 
-st.set_page_config(page_title="İstanbul Mekan Asistanı", layout="wide")
-st.title("İstanbul Mekan ve Hava Durumu Asistanı 📍")
+st.set_page_config(page_title="The Light Passanger", layout="wide")
+st.title("The Light Passanger 📍")
 
 
 if "messages" not in st.session_state:
