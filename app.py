@@ -30,6 +30,7 @@ import uuid
 
 
 load_dotenv() 
+
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")  
 OPENNWEATHER_API_KEY = os.environ["OPENWEATHER_API_KEY"]
 TAVILY_API_KEY = os.environ["TAVILY_API_KEY"]
