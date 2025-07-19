@@ -463,8 +463,8 @@ def router_node(state: AgentState) -> AgentState:
         state["next_node"] = "fun_fact"
     else:
         state["next_node"] = "general"
+        print("DEBUG: Router node set next_node to 'general'") # Bu satırı ekleyin
     return state
-
 def fun_fact_node(state: AgentState) -> AgentState:
     fact = get_fun_fact()
 
@@ -596,25 +596,27 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
     with st.spinner("Düşünüyorum... 🤔"):
         try:
             latest_ai_content = "" 
-
             for s in st.session_state.graph.stream(inputs, config={"configurable": {"thread_id": thread_id}}):
                 if "__end__" not in s:
                     ai_response_message = s.get("messages", [])[-1] if s.get("messages") else None
                     if ai_response_message and isinstance(ai_response_message, AIMessage):
                         latest_ai_content = ai_response_message.content 
-                        
+
             if latest_ai_content:
                 sanitized_final_ai_response = sanitize_markdown(latest_ai_content)
             else:
+                # Bu fallback mesajı neden tetikleniyor, asıl sorumuz bu.
                 sanitized_final_ai_response = sanitize_markdown("Üzgünüm, bir yanıt üretemedim.")
 
             st.session_state.messages.append({"role": "assistant", "content": sanitized_final_ai_response})
             with st.chat_message("assistant"):
-                st.markdown(sanitized_final_ai_response)
+                st.markdown(sanitized_final_ai_response) # st.html yerine st.markdown kullanmaya devam edin
 
         except Exception as e:
             error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin veya farklı bir soru sorun."
+            print(f"DEBUG: Main Streamlit loop exception: {e}") # Ana döngüdeki hataları yakalamak için
             sanitized_error_message = sanitize_markdown(error_message)
             st.session_state.messages.append({"role": "assistant", "content": sanitized_error_message})
             with st.chat_message("assistant"):
                 st.markdown(sanitized_error_message)
+                st.exception(e) # Hatanın detaylarını Streamlit arayüzünde göster
