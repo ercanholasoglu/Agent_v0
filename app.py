@@ -482,8 +482,10 @@ def router_node(state: AgentState) -> AgentState:
         state["next_node"] = "fun_fact"
     else:
         state["next_node"] = "general"
-        print("DEBUG: Router node set next_node to 'general'") # Bu satırı ekleyin
+        
     return state
+
+
 def fun_fact_node(state: AgentState) -> AgentState:
     fact = get_fun_fact()
 
@@ -492,17 +494,20 @@ def fun_fact_node(state: AgentState) -> AgentState:
     return state
 
 def general_response_node(state: AgentState) -> AgentState:
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, openai_api_key=OPENAI_API_KEY) # Pass API key explicitly
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7, openai_api_key=OPENAI_API_KEY)
 
+    # Get the last human message
     human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
-    last_query = human_messages[-1].content.lower() if human_messages else ""
+    if not human_messages:
+        return state
+        
+    last_query = human_messages[-1].content.lower()
 
-    print(f"DEBUG: general_response_node - last_query: '{last_query}'") # Added debug print
-
-    # Check for greeting triggers FIRST
-    greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın", "hi", "alo"]
+    # Greeting triggers (expanded list)
+    greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın", "hi", "alo", "hey", "slm", "heyatım"]
+    
+    # Check for greeting - return early if detected
     if any(g in last_query for g in greeting_triggers):
-        print("DEBUG: general_response_node - Greeting detected!") # Added debug print
         responses = [
             "Merhaba! 👋 İstanbul'da romantik mekan, meyhane, restoran ya da kafe önerisi almak ister misin?",
             "Selam! Size nasıl yardımcı olabilirim? Hava durumu bilgisi veya mekan önerisi alabilirsiniz. 🏙️",
@@ -510,30 +515,24 @@ def general_response_node(state: AgentState) -> AgentState:
             "Nasılsın? İstanbul'da nereye gitmek istersin? Romantik bir mekan mı, meyhane mi? 🍷"
         ]
         chosen = random.choice(responses)
-        state["messages"].append(AIMessage(content=sanitize_markdown(chosen))) # Sanitize here
-        return state # Return early if it's a greeting
+        state["messages"].append(AIMessage(content=sanitize_markdown(chosen)))
+        return state  # RETURN IMMEDIATELY AFTER GREETING
 
-    # If not a greeting, proceed with LLM invocation
+    # If not greeting, proceed with LLM
     try:
         response = llm.invoke(state["messages"])
-        if response and hasattr(response, "content") and response.content:
+        if response and response.content:
             sanitized_content = sanitize_markdown(response.content)
             state["messages"].append(AIMessage(content=sanitized_content))
         else:
-            # Fallback if LLM returns empty/invalid
-            sanitized_fallback = sanitize_markdown("Üzgünüm, bir yanıt üretemedim veya isteğinizi anlayamadım. Size nasıl yardımcı olabilirim?")
-            state["messages"].append(AIMessage(content=sanitized_fallback))
+            fallback = "Merhaba! Size nasıl yardımcı olabilirim?"
+            state["messages"].append(AIMessage(content=sanitize_markdown(fallback)))
     except Exception as e:
-        # Catch any errors during LLM invocation
-        error_message = f"⚠️ Hata: {str(e)}. LLM yanıtı alınamadı."
-        print(f"DEBUG: Error in general_response_node LLM invocation: {e}")
-        sanitized_error = sanitize_markdown(error_message)
-        state["messages"].append(AIMessage(content=sanitized_error))
-        # Add a general fallback if an error occurs
-        sanitized_fallback_after_error = sanitize_markdown("Merhaba! Size nasıl yardımcı olabilirim?")
-        state["messages"].append(AIMessage(content=sanitized_fallback_after_error))
-
+        error_msg = f"Üzgünüm, bir hata oluştu: {str(e)}. Lütfen tekrar deneyin."
+        state["messages"].append(AIMessage(content=sanitize_markdown(error_msg)))
+    
     return state
+
 
 @st.cache_resource
 def create_workflow():
@@ -580,11 +579,18 @@ def create_workflow():
     return graph
 
 # --- STREAMLIT UYGULAMASI ---
-st.set_page_config(page_title="İstanbul Mekan Asistanı 💬", page_icon="🌃")
+st.set_page_config(page_title="The Light Passanger 💬", page_icon="🌃")
 
+# In your Streamlit UI code:
 st.title("İstanbul Mekan Asistanı 💬")
-st.markdown(sanitize_markdown("Merhaba! Ben İstanbul'daki romantik mekan, meyhane, restoran ve kafe önerileri sunan yapay zeka asistanıyım. Ayrıca hava durumu bilgisi veya ilginç bilgiler de sağlayabilirim. Size nasıl yardımcı olabilirim? 😊"))
-
+st.markdown(sanitize_markdown(
+    "Merhaba! Ben İstanbul'daki romantik mekan, meyhane, restoran ve kafe önerileri sunan yapay zeka asistanıyım. "
+    "Size nasıl yardımcı olabilirim? 😊\n\n"
+    "Örnek sorular:\n"
+    "- `Selam! Beşiktaş'ta romantik bir mekan önerebilir misin?`\n"
+    "- `Kadıköy'de hava durumu nasıl?`\n"
+    "- `Bana ilginç bir bilgi verir misin?`"
+))
 # API Anahtarlarının ayarlı olup olmadığını kontrol et
 # This check should now be redundant if the initial try-except block handles missing secrets
 # However, keeping it for extra safety. Just make sure it uses st.secrets.get()
