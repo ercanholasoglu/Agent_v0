@@ -28,6 +28,16 @@ import random
 import os
 import uuid
 
+
+
+OPEN_AI_API_KEY = os.environ.get("OPENAI_API_KEY")  
+OPENNWEATHER_API_KEY = os.environ["OPENWEATHER_API_KEY"]
+TAVILY_API_KEY = os.environ["TAVILY_API_KEY"]
+
+URI = os.environ.get("URI")
+USERNAME = os.environ.get("USERNAME")
+PASSWORD = os.environ.get("PASSWORD")
+
 load_dotenv()
 
 def sanitize_markdown(text):
