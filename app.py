@@ -602,7 +602,7 @@ def create_workflow():
 st.set_page_config(page_title="İstanbul Mekan Asistanı 💬", page_icon="🌃")
 
 st.title("İstanbul Mekan Asistanı 💬")
-st.markdown("Merhaba! Ben İstanbul'daki romantik mekan, meyhane, restoran ve kafe önerileri sunan yapay zeka asistanıyım. Ayrıca hava durumu bilgisi veya ilginç bilgiler de sağlayabilirim. Size nasıl yardımcı olabilirim? 😊")
+st.markdown(sanitize_markdown("Merhaba! Ben İstanbul'daki romantik mekan, meyhane, restoran ve kafe önerileri sunan yapay zeka asistanıyım. Ayrıca hava durumu bilgisi veya ilginç bilgiler de sağlayabilirim. Size nasıl yardımcı olabilirim? 😊"))
 
 # API Anahtarlarının ayarlı olup olmadığını kontrol et
 if not os.getenv("OPENAI_API_KEY") or not os.getenv("OPENWEATHER_API_KEY"):
@@ -622,14 +622,15 @@ if "messages" not in st.session_state:
 # Display chat messages from history on app rerun
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+        st.markdown(sanitize_markdown(msg["content"]))
 
 # Kullanıcıdan girdi al (SADECE BURADA OLMALI)
 if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"):
     # Kullanıcı mesajını geçmişe ekle ve görüntüle
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.markdown(sanitize_markdown(prompt))
+
 
     # LangGraph'ı çalıştırma ve yanıt üretme
     inputs = {"messages": [HumanMessage(content=prompt)]}
