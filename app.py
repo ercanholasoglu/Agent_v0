@@ -31,10 +31,6 @@ import uuid
 load_dotenv()
 
 def sanitize_markdown(text):
-    """
-    Sanitizes Markdown to prevent JavaScript regex errors by carefully escaping
-    problematic patterns.
-    """
     if not isinstance(text, str):
         return str(text)
     if not text:
@@ -45,42 +41,22 @@ def sanitize_markdown(text):
     text = text.replace("<", "&lt;")
     text = text.replace(">", "&gt;")
 
-    # Step 2: Escape backslashes first to prevent double-escaping issues later
+    # Step 2: Escape backslashes first to prevent them from escaping other characters
     text = text.replace("\\", "\\\\")
 
-    # Step 3: Escape Markdown special characters
-    # Only characters that need escaping when they are not part of a valid Markdown syntax
-    # and could be misinterpreted as regex or other special constructs.
-    # The crucial part for the error is typically '(', '?', and potentially other regex metacharacters.
-    special_chars_to_escape = r"\*_{}[]()#+-.!|:`" # Added ` ` (backtick) for code blocks
+    # Step 3: Escape common markdown special characters that might interfere with autolinking
+    # This list can be expanded based on problematic patterns
+    special_chars = ['*', '_', '`', '[', ']', '(', ')', '#', '+', '-', '.', '!', '~', '|', '{', '}']
+    for char in special_chars:
+        text = text.replace(char, f"\\{char}")
 
-    # Create a regex pattern to match and escape these characters
-    # Use a positive lookahead to ensure we don't escape already escaped characters
-    # This also helps with the `(?` issue by ensuring `(` is escaped if followed by `?`
-    # or other problematic characters.
-    for char in special_chars_to_escape:
-        # This approach carefully replaces the character with its escaped version.
-        # It's important not to over-escape or interfere with valid Markdown.
-        # For the specific `(?` issue, we can be more direct.
-        if char == '(': # Specifically handle the opening parenthesis
-            text = text.replace('(?', '\\(?') # Escape (? directly
-            text = text.replace('(', '\\(') # Escape standalone (
-
-        elif char == '?': # Specifically handle the question mark
-            # Already handled by '\(?' if it's part of that sequence.
-            # If standalone, it might not be as critical but can be escaped.
-            text = text.replace('?', '\\?')
-        else:
-            text = text.replace(char, f"\\{char}")
-            
-    # Remove zero-width space if it was used in previous attempts, as it might
-    # also cause rendering issues.
-    text = text.replace('\u200B', '')
-
-    # Step 4: Unicode normalization (optional, but good for consistency)
-    # This might remove diacritics, so consider if this is desired.
-    # For general text display, it's often fine.
-    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8')
+    # Optional: More aggressive escaping for patterns that might look like URLs or emails if you don't want them autolinked
+    # If you truly want to prevent ANY autolinking, you might need to preprocess more heavily.
+    # For example, replace '.' with '\.' but be careful not to break valid markdown.
+    # This is generally NOT recommended as it breaks intended markdown behavior,
+    # but could be a last resort for specific problematic strings.
+    # text = text.replace('.', '\\.')
+    # text = text.replace('@', '\\@')
 
     return text
 
