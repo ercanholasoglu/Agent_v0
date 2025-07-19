@@ -302,7 +302,6 @@ weather_cache = TTLCache(maxsize=100, ttl=300)
 def get_openweather_forecast(location: str) -> Dict:
     api_key = st.secrets.get("OPENWEATHER_API_KEY")
     if not api_key:
-        # st.error("OpenWeather API anahtarı bulunamadı.") # Removed for pop-up reduction
         return {"error": "API anahtarı bulunamadı."}
     try:
         geo_response = requests.get(
@@ -312,9 +311,11 @@ def get_openweather_forecast(location: str) -> Dict:
         geo_response.raise_for_status()
         geo = geo_response.json()
         if not geo:
-            # st.warning(f"'{location}' konumu için coğrafi veri bulunamadı.") # Removed for pop-up reduction
             return {"error": f"'{location}' konumu bulunamadı."}
-        lat, lon = geo[0]["lat"], geo[0]["_lon"]
+        
+        # Hata burada! "_lon" yerine "lon" olmalı:
+        lat, lon = geo[0]["lat"], geo[0]["lon"] # Düzeltilen Satır
+        
         weather_response = requests.get(
             f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units=metric&lang=tr",
             timeout=10,
@@ -323,10 +324,8 @@ def get_openweather_forecast(location: str) -> Dict:
         weather = weather_response.json()
         return weather
     except requests.exceptions.RequestException as e:
-        # st.error(f"OpenWeather API hatası: {e}") # Removed for pop-up reduction
         return {"error": f"API hatası: {e}"}
     except Exception as e:
-        # st.error(f"Hava durumu verisi alınırken beklenmedik hata: {e}") # Removed for pop-up reduction
         return {"error": f"Beklenmedik bir hata oluştu: {e}"}
 
 def format_weather_response(location: str, data: Dict) -> str:
