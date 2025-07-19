@@ -838,4 +838,4 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
                 st.markdown(error_message)
                 st.exception(e)
     # Rerun the app to show the latest message
-    st.experimental_rerun()
+    st.rerun()
