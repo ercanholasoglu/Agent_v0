@@ -94,6 +94,10 @@ class Neo4jConnector:
         if self.driver:
             self.driver.close()
             self.driver = None
+            
+    if not st.secrets.get("OPENAI_API_KEY") or not st.secrets.get("OPENWEATHER_API_KEY"):
+        st.error("⚠️ API anahtarları eksik! Lütfen Streamlit Cloud kontrol panelinizdeki 'Secrets' kısmında `OPENAI_API_KEY` ve `OPENWEATHER_API_KEY` değişkenlerini ayarlayın.")
+        st.stop()
 
     def get_meyhaneler(self, limit: int = 10000) -> List[Dict[str, Any]]:
         """
