@@ -769,52 +769,38 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
     with st.spinner("Düşünüyorum... 🤔"):
         try:
-            final_state = None
-            # LangGraph akışını başlat
-            # Iterate through the stream to get the final state
-            for step in st.session_state.graph.stream(
+            final_state_data = {} # Initialize an empty dict to store the final state
+            latest_ai_message_content = None
+
+            # LangGraph akışını başlat ve tüm çıktıları işle
+            for chunk in st.session_state.graph.stream(
                 current_state,
                 config={"configurable": {"thread_id": thread_id}}
             ):
-                st.info(f"LangGraph adım sonucu: {step}")
-                # The 'step' variable will contain the state update from each node.
-                # The full state can be found in the `final_state` after the loop.
-                # However, for the UI, we only care about the *new* messages.
-                # We need to extract the *last* AIMessage added during this particular turn.
-                final_state = step # This will be the state *after* the last node's execution
-
-            if final_state and "messages" in final_state and final_state["messages"]:
-                # Find the latest AIMessage added in this turn
-                # We need to compare the messages list before and after the graph run.
-                # The stream gives incremental updates. We want the message generated in the last step.
+                st.info(f"LangGraph adım sonucu: {chunk}")
                 
-                # A more robust way: Compare length of messages, or assume the last AIMessage is the new one.
-                # For this specific flow where `AIMessage` is appended right before END:
-                latest_ai_message = None
-                # Search for the *last* AIMessage from the final state's messages list
-                for msg in reversed(final_state["messages"]):
+                # If the chunk contains the final state, update final_state_data
+                if "__end__" in chunk:
+                    final_state_data = chunk["__end__"]
+                # Otherwise, if it's an intermediate state with messages, update messages in final_state_data
+                elif "messages" in chunk and chunk["messages"]:
+                    final_state_data["messages"] = chunk["messages"]
+
+            # After the stream, check the collected final_state_data
+            if final_state_data and "messages" in final_state_data and final_state_data["messages"]:
+                # Find the last AIMessage in the final collected state
+                for msg in reversed(final_state_data["messages"]):
                     if isinstance(msg, AIMessage):
-                        latest_ai_message = msg
+                        latest_ai_message_content = msg.content
                         break
 
-                if latest_ai_message:
-                    # Check if this message is already in st.session_state.messages
-                    # This check is important to avoid adding duplicates if Streamlit reruns.
-                    is_duplicate = False
-                    for existing_msg in st.session_state.messages:
-                        if existing_msg.get("role") == "assistant" and existing_msg.get("content") == latest_ai_message.content:
-                            is_duplicate = True
-                            break
+                if latest_ai_message_content:
+                    sanitized_content = sanitize_markdown(latest_ai_message_content)
+                    st.session_state.messages.append({"role": "assistant", "content": sanitized_content})
+                    st.success("Asistan yanıtı başarıyla eklendi.")
                     
-                    if not is_duplicate:
-                        sanitized_content = sanitize_markdown(latest_ai_message.content)
-                        st.session_state.messages.append({"role": "assistant", "content": sanitized_content})
-                        st.success("Asistan yanıtı başarılı.")
-                        
-                        with st.chat_message("assistant"):
-                            st.markdown(sanitized_content, unsafe_allow_html=True)
-                    else:
-                        st.info("Yanıt zaten geçmişte var, tekrar eklenmedi.")
+                    with st.chat_message("assistant"):
+                        st.markdown(sanitized_content, unsafe_allow_html=True)
                 else:
                     error_msg = "Üzgünüm, bir yanıt üretemedim. LangGraph akışı tamamlandı ancak AI mesajı bulunamadı. Lütfen tekrar deneyin."
                     st.session_state.messages.append({"role": "assistant", "content": error_msg})
@@ -828,7 +814,6 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
                     st.markdown(error_msg)
                 st.error("LangGraph akışı boş veya geçersiz bir durumla tamamlandı.")
 
-
         except Exception as e:
             error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin."
             st.error(f"Ana döngüde beklenmedik hata: {str(e)}")
@@ -836,6 +821,5 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
             st.session_state.messages.append({"role": "assistant", "content": error_message})
             with st.chat_message("assistant"):
                 st.markdown(error_message)
-                st.exception(e)
-    # Rerun the app to show the latest message
+                st.exception(e)   # Rerun the app to show the latest message
     st.rerun()
