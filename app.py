@@ -592,6 +592,8 @@ def general_response_node(state: AgentState) -> AgentState:
     human_messages = [msg for msg in state["messages"] if isinstance(msg, HumanMessage)]
     if not human_messages:
         st.warning("general_response_node: İnsan mesajı bulunamadı.")
+        # If no human message, return state and let the graph handle it
+        state["next_node"] = "no_human_message" # A custom state for this edge case
         return state
 
     last_query = human_messages[-1].content.lower()
@@ -600,7 +602,7 @@ def general_response_node(state: AgentState) -> AgentState:
     # Greeting triggers (expanded list)
     greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın", "hi", "alo", "hey", "slm", "heyatım", "hayatım"]
 
-    # Check for greeting - return early if detected
+    # Check for greeting - return early if detected and set next_node
     if any(g in last_query for g in greeting_triggers):
         responses = [
             "Merhaba! 👋 İstanbul'da romantik mekan, meyhane, restoran ya da kafe önerisi almak ister misin?",
@@ -610,25 +612,31 @@ def general_response_node(state: AgentState) -> AgentState:
         ]
         chosen = random.choice(responses)
         state["messages"].append(AIMessage(content=sanitize_markdown(chosen)))
-        st.success("Selamlama yanıtı AIMessage olarak eklendi.")
+        state["next_node"] = "end_conversation" # Set a flag to end after greeting
+        st.success("Selamlama yanıtı AIMessage olarak eklendi ve sonlandırılacak.")
         return state
 
     # If not a greeting, proceed with LLM
     try:
         st.info("LLM çağrısı yapılıyor...")
+        # Prepare messages for the LLM. Exclude the initial SystemMessage if you want
+        # the LLM to generate its own general response based on the actual conversation.
+        # Otherwise, the system message guides it. For general response, keeping it is fine.
         response = llm.invoke(state["messages"])
         if response and response.content:
             st.success("LLM yanıtı alındı.")
             state["messages"].append(AIMessage(content=sanitize_markdown(response.content)))
+            state["next_node"] = "summarize_or_end" # Normal flow
         else:
             st.warning("LLM'den boş veya geçersiz yanıt alındı.")
             fallback = "Merhaba! Size nasıl yardımcı olabilirim?"
             state["messages"].append(AIMessage(content=sanitize_markdown(fallback)))
-
+            state["next_node"] = "end_conversation" # Fallback, then end
     except Exception as e:
         st.error(f"General response LLM çağrısında hata oluştu: {str(e)}")
         error_msg = f"Üzgünüm, bir hata oluştu: {str(e)}. Lütfen tekrar deneyin."
         state["messages"].append(AIMessage(content=sanitize_markdown(error_msg)))
+        state["next_node"] = "end_conversation" # On error, end
 
     return state  # CRITICAL: Return state after processing
 
@@ -662,15 +670,16 @@ def create_workflow():
     workflow.add_edge("weather", END)
     workflow.add_edge("fun_fact", END)
 
+    # Modify this part:
     workflow.add_conditional_edges(
         "general",
-        lambda state: "summarize" if len(state["messages"]) > 5 else END,
+        lambda state: "summarize" if state.get("next_node") == "summarize_or_end" and len(state["messages"]) > 5 else END,
         {
             "summarize": "summarize",
             END: END
         }
     )
-    workflow.add_edge("summarize", END)
+    workflow.add_edge("summarize", END) # Summarize always ends the current turn
 
     memory = MemorySaver()
     graph = workflow.compile(checkpointer=memory)
@@ -790,4 +799,4 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
             st.session_state.messages.append({"role": "assistant", "content": error_message})
             with st.chat_message("assistant"):
                 st.markdown(error_message)
-                st.exception(e) # Display exception details in Streamlit for advanced debugging
+                st.exception(e)
