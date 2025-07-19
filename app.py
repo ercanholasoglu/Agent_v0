@@ -612,8 +612,8 @@ def general_response_node(state: AgentState) -> AgentState:
         ]
         chosen = random.choice(responses)
         state["messages"].append(AIMessage(content=sanitize_markdown(chosen)))
-        state["next_node"] = "end_conversation" # Set a flag to end after greeting
-        st.success("Selamlama yanıtı AIMessage olarak eklendi ve sonlandırılacak.")
+        # Do not set next_node to "end_conversation" here. Let the graph flow determine END based on conditions.
+        st.success("Selamlama yanıtı AIMessage olarak eklendi.")
         return state
 
     # If not a greeting, proceed with LLM
@@ -673,6 +673,8 @@ def create_workflow():
     # Modify this part:
     workflow.add_conditional_edges(
         "general",
+        # If it's a greeting, we want to end the turn.
+        # If it's a regular general response and conversation is long, summarize, else end.
         lambda state: "summarize" if state.get("next_node") == "summarize_or_end" and len(state["messages"]) > 5 else END,
         {
             "summarize": "summarize",
@@ -755,41 +757,46 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
     with st.spinner("Düşünüyorum... 🤔"):
         try:
-            latest_ai_content = ""
+            final_state = None
             # LangGraph akışını başlat
             for step in st.session_state.graph.stream(
                 current_state,
                 config={"configurable": {"thread_id": thread_id}}
             ):
                 st.info(f"LangGraph adım sonucu: {step}")
-                
-                # Eğer bu adımda mesajlar varsa ve son mesaj AI tarafından oluşturulmuşsa
-                if "messages" in step and step["messages"]:
-                    # Ensure it's the latest message appended by the current node
-                    last_message = step["messages"][-1] 
-                    if isinstance(last_message, AIMessage):
-                        latest_ai_content = last_message.content
-                        st.info(f"LangGraph'tan gelen son AIMessage içeriği: {latest_ai_content[:100]}...")
-                        # This append within the loop is crucial for progressive updates,
-                        # but in Streamlit we typically want the final answer.
-                        # We'll collect the last one.
+                # Keep track of the last observed state
+                final_state = step
 
-            if latest_ai_content:
-                # Sanitize et ve ekle
-                sanitized_content = sanitize_markdown(latest_ai_content)
-                st.session_state.messages.append({"role": "assistant", "content": sanitized_content})
-                st.success("Asistan yanıtı başarılı.")
-                
-                # Yanıtı göster
-                with st.chat_message("assistant"):
-                    st.markdown(sanitized_content, unsafe_allow_html=True)
+            if final_state and "messages" in final_state and final_state["messages"]:
+                # Find the last AIMessage in the final state
+                latest_ai_message = None
+                for msg in reversed(final_state["messages"]):
+                    if isinstance(msg, AIMessage):
+                        latest_ai_message = msg
+                        break
+
+                if latest_ai_message:
+                    # Sanitize et ve ekle
+                    sanitized_content = sanitize_markdown(latest_ai_message.content)
+                    st.session_state.messages.append({"role": "assistant", "content": sanitized_content})
+                    st.success("Asistan yanıtı başarılı.")
+                    
+                    # Yanıtı göster
+                    with st.chat_message("assistant"):
+                        st.markdown(sanitized_content, unsafe_allow_html=True)
+                else:
+                    # Fallback mesajı
+                    error_msg = "Üzgünüm, bir yanıt üretemedim. LangGraph akışı tamamlandı ancak AI mesajı bulunamadı. Lütfen tekrar deneyin."
+                    st.session_state.messages.append({"role": "assistant", "content": error_msg})
+                    with st.chat_message("assistant"):
+                        st.markdown(error_msg)
+                    st.error("LangGraph akışı AI mesajı üretmeden tamamlandı.")
             else:
-                # Fallback mesajı
-                error_msg = "Üzgünüm, bir yanıt üretemedim. LangGraph akışı tamamlandı ancak AI mesajı bulunamadı. Lütfen tekrar deneyin."
+                error_msg = "Üzgünüm, bir yanıt üretemedim. LangGraph akışı tamamlandı ancak hiçbir mesaj döndürülmedi. Lütfen tekrar deneyin."
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
                 with st.chat_message("assistant"):
                     st.markdown(error_msg)
-                st.error("LangGraph akışı AI mesajı üretmeden tamamlandı.")
+                st.error("LangGraph akışı boş veya geçersiz bir durumla tamamlandı.")
 
 
         except Exception as e:
