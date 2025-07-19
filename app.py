@@ -535,7 +535,7 @@ def search_meyhaneler_node(state: AgentState) -> AgentState:
             )
             formatted_results.append(result_entry)
 
-        sanitized_content = sanitize_markdown("\n".join(formatted_results))
+        sanitized_content = sanitize_markdown("Harika mekan önerilerim var:\n\n" + "\n".join(formatted_results))
         state["messages"].append(AIMessage(content=sanitized_content))
         st.success("Mekan arama sonuçları AIMessage olarak eklendi.")
         return state
@@ -552,7 +552,12 @@ def router_node(state: AgentState) -> AgentState:
     content = last_msg.content.lower()
     st.info(f"Yönlendirme için son mesaj içeriği: {content}")
 
-    if any(t in content for t in ["meyhane", "restoran", "kafe", "date", "randevu", "mekan", "öneri", "neresi", "yer", "yemek", "içki"]):
+    # Use a flag for greeting to decide next_node
+    greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın", "hi", "alo", "hey", "slm", "heyatım", "hayatım"]
+    if any(g in content for g in greeting_triggers):
+        state["next_node"] = "greeting" # New custom next_node for greetings
+        st.info("Yönlendirme: greeting (selamlama)")
+    elif any(t in content for t in ["meyhane", "restoran", "kafe", "date", "randevu", "mekan", "öneri", "neresi", "yer", "yemek", "içki"]):
         state["next_node"] = "search"
         st.info("Yönlendirme: search (mekan araması)")
     elif any(t in content for t in ["hava", "weather", "sıcaklık", "nem", "yağmur", "açık", "kapalı", "derece"]):
@@ -593,17 +598,18 @@ def general_response_node(state: AgentState) -> AgentState:
     if not human_messages:
         st.warning("general_response_node: İnsan mesajı bulunamadı.")
         # If no human message, return state and let the graph handle it
-        state["next_node"] = "no_human_message" # A custom state for this edge case
+        state["next_node"] = "end_conversation_due_to_no_human_message" # A custom state for this edge case
         return state
 
     last_query = human_messages[-1].content.lower()
     st.info(f"General response için son kullanıcı sorgusu: {last_query}")
 
-    # Greeting triggers (expanded list)
+    # Greeting triggers (expanded list) - This part is now handled by the router
+    # But as a fallback/redundancy, we can still have a basic check here.
     greeting_triggers = ["selam", "merhaba", "günaydın", "naber", "nasılsın", "hi", "alo", "hey", "slm", "heyatım", "hayatım"]
+    is_greeting = any(g in last_query for g in greeting_triggers)
 
-    # Check for greeting - return early if detected and set next_node
-    if any(g in last_query for g in greeting_triggers):
+    if is_greeting:
         responses = [
             "Merhaba! 👋 İstanbul'da romantik mekan, meyhane, restoran ya da kafe önerisi almak ister misin?",
             "Selam! Size nasıl yardımcı olabilirim? Hava durumu bilgisi veya mekan önerisi alabilirsiniz. 🏙️",
@@ -612,31 +618,29 @@ def general_response_node(state: AgentState) -> AgentState:
         ]
         chosen = random.choice(responses)
         state["messages"].append(AIMessage(content=sanitize_markdown(chosen)))
-        # Do not set next_node to "end_conversation" here. Let the graph flow determine END based on conditions.
+        # For greetings, we can directly set next_node to indicate completion
+        state["next_node"] = "greeting_handled" # Indicate that a greeting was handled and can end
         st.success("Selamlama yanıtı AIMessage olarak eklendi.")
         return state
 
     # If not a greeting, proceed with LLM
     try:
         st.info("LLM çağrısı yapılıyor...")
-        # Prepare messages for the LLM. Exclude the initial SystemMessage if you want
-        # the LLM to generate its own general response based on the actual conversation.
-        # Otherwise, the system message guides it. For general response, keeping it is fine.
         response = llm.invoke(state["messages"])
         if response and response.content:
             st.success("LLM yanıtı alındı.")
             state["messages"].append(AIMessage(content=sanitize_markdown(response.content)))
-            state["next_node"] = "summarize_or_end" # Normal flow
+            state["next_node"] = "general_handled" # Indicate that a general response was handled
         else:
             st.warning("LLM'den boş veya geçersiz yanıt alındı.")
             fallback = "Merhaba! Size nasıl yardımcı olabilirim?"
             state["messages"].append(AIMessage(content=sanitize_markdown(fallback)))
-            state["next_node"] = "end_conversation" # Fallback, then end
+            state["next_node"] = "general_handled" # Fallback, then indicate handled
     except Exception as e:
         st.error(f"General response LLM çağrısında hata oluştu: {str(e)}")
         error_msg = f"Üzgünüm, bir hata oluştu: {str(e)}. Lütfen tekrar deneyin."
         state["messages"].append(AIMessage(content=sanitize_markdown(error_msg)))
-        state["next_node"] = "end_conversation" # On error, end
+        state["next_node"] = "general_handled" # On error, indicate handled
 
     return state  # CRITICAL: Return state after processing
 
@@ -663,25 +667,28 @@ def create_workflow():
             "weather": "weather",
             "general": "general",
             "fun_fact": "fun_fact",
+            "greeting": "general", # Router will send greetings to general node
         }
     )
 
+    # All specific nodes (search, weather, fun_fact) should now go to END
     workflow.add_edge("search", END)
     workflow.add_edge("weather", END)
     workflow.add_edge("fun_fact", END)
 
-    # Modify this part:
+    # General node now explicitly handles its own ending based on the 'next_node' it sets
     workflow.add_conditional_edges(
         "general",
-        # If it's a greeting, we want to end the turn.
-        # If it's a regular general response and conversation is long, summarize, else end.
-        lambda state: "summarize" if state.get("next_node") == "summarize_or_end" and len(state["messages"]) > 5 else END,
+        lambda state: state.get("next_node", "general_handled"), # Default to general_handled if not set
         {
-            "summarize": "summarize",
-            END: END
+            "greeting_handled": END, # If it was a greeting, end
+            "general_handled": END,  # If it was a general LLM response, end
+            "end_conversation_due_to_no_human_message": END # If no human message, end
         }
     )
-    workflow.add_edge("summarize", END) # Summarize always ends the current turn
+
+    # The summarize node always ends the turn for now. If you want more complex summarization flow, adjust this.
+    workflow.add_edge("summarize", END)
 
     memory = MemorySaver()
     graph = workflow.compile(checkpointer=memory)
@@ -736,6 +743,11 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
 
     # LangGraph için mesajları hazırla
     langgraph_messages = []
+    # Add SystemMessage at the beginning of LangGraph messages for each run if not already present
+    # This ensures the LLM always has the initial system prompt
+    if not any(isinstance(msg, SystemMessage) for msg in st.session_state.messages):
+         langgraph_messages.append(SystemMessage(content=SYSTEM_PROMPT))
+
     for msg in st.session_state.messages:
         if msg["role"] == "user":
             langgraph_messages.append(HumanMessage(content=msg["content"]))
@@ -759,40 +771,58 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
         try:
             final_state = None
             # LangGraph akışını başlat
+            # Iterate through the stream to get the final state
             for step in st.session_state.graph.stream(
                 current_state,
                 config={"configurable": {"thread_id": thread_id}}
             ):
                 st.info(f"LangGraph adım sonucu: {step}")
-                # Keep track of the last observed state
-                final_state = step
+                # The 'step' variable will contain the state update from each node.
+                # The full state can be found in the `final_state` after the loop.
+                # However, for the UI, we only care about the *new* messages.
+                # We need to extract the *last* AIMessage added during this particular turn.
+                final_state = step # This will be the state *after* the last node's execution
 
             if final_state and "messages" in final_state and final_state["messages"]:
-                # Find the last AIMessage in the final state
+                # Find the latest AIMessage added in this turn
+                # We need to compare the messages list before and after the graph run.
+                # The stream gives incremental updates. We want the message generated in the last step.
+                
+                # A more robust way: Compare length of messages, or assume the last AIMessage is the new one.
+                # For this specific flow where `AIMessage` is appended right before END:
                 latest_ai_message = None
+                # Search for the *last* AIMessage from the final state's messages list
                 for msg in reversed(final_state["messages"]):
                     if isinstance(msg, AIMessage):
                         latest_ai_message = msg
                         break
 
                 if latest_ai_message:
-                    # Sanitize et ve ekle
-                    sanitized_content = sanitize_markdown(latest_ai_message.content)
-                    st.session_state.messages.append({"role": "assistant", "content": sanitized_content})
-                    st.success("Asistan yanıtı başarılı.")
+                    # Check if this message is already in st.session_state.messages
+                    # This check is important to avoid adding duplicates if Streamlit reruns.
+                    is_duplicate = False
+                    for existing_msg in st.session_state.messages:
+                        if existing_msg.get("role") == "assistant" and existing_msg.get("content") == latest_ai_message.content:
+                            is_duplicate = True
+                            break
                     
-                    # Yanıtı göster
-                    with st.chat_message("assistant"):
-                        st.markdown(sanitized_content, unsafe_allow_html=True)
+                    if not is_duplicate:
+                        sanitized_content = sanitize_markdown(latest_ai_message.content)
+                        st.session_state.messages.append({"role": "assistant", "content": sanitized_content})
+                        st.success("Asistan yanıtı başarılı.")
+                        
+                        with st.chat_message("assistant"):
+                            st.markdown(sanitized_content, unsafe_allow_html=True)
+                    else:
+                        st.info("Yanıt zaten geçmişte var, tekrar eklenmedi.")
                 else:
-                    # Fallback mesajı
                     error_msg = "Üzgünüm, bir yanıt üretemedim. LangGraph akışı tamamlandı ancak AI mesajı bulunamadı. Lütfen tekrar deneyin."
                     st.session_state.messages.append({"role": "assistant", "content": error_msg})
                     with st.chat_message("assistant"):
                         st.markdown(error_msg)
                     st.error("LangGraph akışı AI mesajı üretmeden tamamlandı.")
             else:
-                error_msg = "Üzgünüm, bir yanıt üretemedim. LangGraph akışı tamamlandı ancak hiçbir mesaj döndürülmedi. Lütfen tekrar deneyin."
+                error_msg = "Üzgünüm, bir yanıt üretemedim. LangGraph akışı boş veya geçersiz bir durumla tamamlandı."
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
                 with st.chat_message("assistant"):
                     st.markdown(error_msg)
@@ -807,3 +837,5 @@ if prompt := st.chat_input("Mesajınızı buraya yazın...", key="my_chat_input"
             with st.chat_message("assistant"):
                 st.markdown(error_message)
                 st.exception(e)
+    # Rerun the app to show the latest message
+    st.experimental_rerun()
