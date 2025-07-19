@@ -11,7 +11,7 @@ from langchain_community.vectorstores import InMemoryVectorStore
 from langgraph.graph import StateGraph, END, START
 from langgraph.graph.message import add_messages
 from neo4j import GraphDatabase
-# Removed: from dotenv import load_dotenv
+
 from langchain_core.documents import Document
 from typing import List, Dict, Any
 import re
@@ -36,7 +36,6 @@ try:
     USERNAME = st.secrets["NEO4J_USER"]
     PASSWORD = st.secrets["NEO4J_PASSWORD"]
     NEO4J_DATABASE = st.secrets.get("NEO4J_DATABASE", "neo4j")
-
 except KeyError as e:
     st.error(f"Eksik Streamlit sırrı: {e}. Lütfen Streamlit Cloud kontrol panelinizde yapılandırın.")
     st.stop()
@@ -44,12 +43,12 @@ except KeyError as e:
 
 def sanitize_markdown(text):
     if not isinstance(text, str):
-
         return str(text)
     if not text:
         return ""
 
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
     markdown_chars = ['\\', '*', '_', '~', '`', '#', '[', ']', '(', ')', '{', '}', '!', '^']
     for char in markdown_chars:
         text = text.replace(char, f"\\{char}")
@@ -59,25 +58,20 @@ def sanitize_markdown(text):
 
 def safe_markdown(text):
     try:
-
         re.compile(text)
         return text
     except re.error:
-
         return f"<pre>{text}</pre>"
-
 
 class Neo4jConnector:
     def __init__(self):
-
-        self.uri = st.secrets["NEO4J_URI"] 
-        self.user = st.secrets["NEO4J_USER"] 
-        self.password = st.secrets["NEO4J_PASSWORD"] 
+        self.uri = st.secrets["NEO4J_URI"]
+        self.user = st.secrets["NEO4J_USER"]
+        self.password = st.secrets["NEO4J_PASSWORD"]
         self.database = st.secrets.get("NEO4J_DATABASE", "neo4j")
         self.driver = None
 
     def connect(self):
-        """Establishes a connection to Neo4j."""
         if self.driver is None:
             try:
                 self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
@@ -88,16 +82,12 @@ class Neo4jConnector:
                 raise ConnectionError(f"Neo4j bağlantı hatası: {exc}") from exc
 
     def close(self):
-        """Closes the Neo4j driver if it's open."""
         if self.driver:
             self.driver.close()
             self.driver = None
 
 
     def get_meyhaneler(self, limit: int = 10000) -> List[Dict[str, Any]]:
-        """
-        Fetches 'Meyhane' nodes from Neo4j in the format expected by your LangGraph app.
-        """
         self.connect()
         query = """
         MATCH (m:Meyhane)
@@ -125,10 +115,6 @@ class Neo4jConnector:
 
     @staticmethod
     def _clean_record(record) -> Dict[str, Any]:
-        """
-        Cleans Neo4j record by replacing None values with defaults
-        and ensuring correct types for numeric fields.
-        """
         name = record.get("name") or "Bilinmiyor"
         address = record.get("address") or "Adres yok"
         rating_value = record.get("rating")
@@ -152,7 +138,6 @@ class Neo4jConnector:
         }
 
 def add_messages(left: List[BaseMessage], right: List[BaseMessage]) -> List[BaseMessage]:
-    """Combines two lists of BaseMessage, used for state annotation."""
     return left + right
 
 class AgentState(TypedDict):
@@ -218,7 +203,7 @@ def initialize_retriever():
     try:
         vectorstore = InMemoryVectorStore.from_documents(
             documents=processed_docs,
-            embedding=OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY) 
+            embedding=OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
         )
         st.success("Vektör deposu başarıyla oluşturuldu.")
         return vectorstore.as_retriever(search_kwargs={"k": 5})
@@ -255,7 +240,7 @@ SUMMARY_PROMPT = ChatPromptTemplate.from_messages([
 def get_fun_fact() -> str:
     try:
         response = requests.get("https://uselessfacts.jsph.pl/api/v2/facts/random?language=tr", timeout=5)
-        response.raise_for_status() 
+        response.raise_for_status()
         fact = response.json().get("text", "İlginç bir bilgi bulunamadı.")
         return fact
     except requests.exceptions.Timeout:
@@ -312,7 +297,7 @@ weather_cache = TTLCache(maxsize=100, ttl=300)
 
 @cached(weather_cache)
 def get_openweather_forecast(location: str) -> Dict:
-    api_key = st.secrets.get("OPENWEATHER_API_KEY") # Corrected
+    api_key = st.secrets.get("OPENWEATHER_API_KEY")
     if not api_key:
         st.error("OpenWeather API anahtarı bulunamadı.")
         return {"error": "API anahtarı bulunamadı."}
@@ -359,7 +344,6 @@ def format_weather_response(location: str, data: Dict) -> str:
             forecast_time = datetime.fromtimestamp(timestamp)
             forecast_date = forecast_time.date()
 
-            # Sadece bugünden sonraki veya bugünü kapsayan 5 günlük tahmini al
             if forecast_date >= today and len(daily_forecasts) < 5:
                 date_str = "Bugün" if forecast_date == today else forecast_time.strftime("%d %B")
                 temp = item["main"]["temp"]
@@ -410,7 +394,7 @@ class Tools:
         st.info("Hava durumu aracı çağrıldı...")
         messages = state['messages']
         query = messages[-1].content
-        location = clean_location_query(query) 
+        location = clean_location_query(query)
         
         weather_data = get_openweather_forecast(location)
         formatted_weather = format_weather_response(location, weather_data)
@@ -426,7 +410,7 @@ class Tools:
         messages = state['messages']
 
         user_message_content = messages[-1].content
-        retrieved_docs = self.retriever.invoke(user_message_content, k=5) 
+        retrieved_docs = self.retriever.invoke(user_message_content, k=5)
 
         context_str = "\n".join([doc.page_content for doc in retrieved_docs])
         if context_str:
@@ -483,7 +467,7 @@ class Tools:
             return "search_places"
 
         st.success("Genel yanıt rotasına yönlendiriliyor.")
-        return "generate_response" 
+        return "generate_response"
 
 
 def create_workflow():
@@ -504,7 +488,7 @@ def create_workflow():
 
     workflow.add_conditional_edges(
         "route_question",
-        lambda state: state["next_node"] if state.get("next_node") else state["messages"][-1].content, # HACK: Use content for routing
+        lambda state: state["next_node"] if state.get("next_node") else state["messages"][-1].content,
         {
             "search_places": "search_places",
             "weather": "get_weather_forecast",
@@ -526,7 +510,6 @@ def create_workflow():
     st.success("LangGraph iş akışı başarıyla oluşturuldu.")
     return app
 
-# --- Streamlit Uygulaması ---
 st.set_page_config(page_title="İstanbul Mekan Asistanı", layout="wide")
 st.title("İstanbul Mekan ve Hava Durumu Asistanı 📍")
 
@@ -554,7 +537,7 @@ if prompt := st.chat_input("Nasıl yardımcı olabilirim?"):
         
         config = {"configurable": {"thread_id": st.session_state.conversation_thread_id}}
 
-        response_placeholder = st.empty() 
+        response_placeholder = st.empty()
         latest_ai_message_content = ""
 
         try:
@@ -565,10 +548,9 @@ if prompt := st.chat_input("Nasıl yardımcı olabilirim?"):
                         for msg in reversed(node_output["messages"]):
                             if isinstance(msg, AIMessage) and msg.content:
                                 latest_ai_message_content = msg.content
-                                break 
+                                break
 
 
- 
             if latest_ai_message_content:
                 sanitized_content = sanitize_markdown(latest_ai_message_content)
                 st.session_state.messages.append({"role": "assistant", "content": sanitized_content})
@@ -589,5 +571,5 @@ if prompt := st.chat_input("Nasıl yardımcı olabilirim?"):
             st.session_state.messages.append({"role": "assistant", "content": error_message})
             with st.chat_message("assistant"):
                 st.markdown(error_message)
-                st.exception(e)  
+                st.exception(e)
     st.rerun()
