@@ -28,7 +28,6 @@ import random
 import os
 import uuid
 
-# Load secrets directly from Streamlit's secrets management
 try:
     OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
     OPENWEATHER_API_KEY = st.secrets["OPENWEATHER_API_KEY"]
@@ -48,10 +47,7 @@ def sanitize_markdown(text):
     if not text:
         return ""
 
-    # Basic HTML escaping for safety
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    # Escape markdown special characters
     markdown_chars = ['\\', '*', '_', '~', '`', '#', '[', ']', '(', ')', '{', '}', '!', '^']
     for char in markdown_chars:
         text = text.replace(char, f"\\{char}")
@@ -59,10 +55,7 @@ def sanitize_markdown(text):
     return text
 
 def safe_markdown(text):
-    # This function seems redundant given sanitize_markdown,
-    # and its regex compilation check is not suitable for general markdown.
-    # It's better to rely on Streamlit's markdown rendering with safe text.
-    return text # Assuming sanitize_markdown already handled safety
+    return text 
 
 class Neo4jConnector:
     def __init__(self):
@@ -77,10 +70,27 @@ class Neo4jConnector:
             try:
                 self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
                 with self.driver.session(database=self.database) as session:
-                    session.run("RETURN 1") # Test connection
+                    session.run("RETURN 1") 
             except Exception as exc:
-                # st.error(f"Neo4j bağlantı hatası: {exc}") # Removed for pop-up reduction
                 raise ConnectionError(f"Neo4j bağlantı hatası: {exc}") from exc
+    def save_chat_message(self, session_id: str, role: str, content: str, timestamp: datetime):
+        self.connect()
+        query = """
+        MERGE (s:ChatSession {id: $session_id})
+        CREATE (m:ChatMessage {
+            role: $role,
+            content: $content,
+            timestamp: $timestamp
+        })
+        MERGE (s)-[:HAS_MESSAGE]->(m)
+        """
+        try:
+            with self.driver.session(database=self.database) as session:
+                session.run(query, session_id=session_id, role=role, content=content, timestamp=timestamp.isoformat())
+                print(f"Mesaj Neo4j'ye kaydedildi: Oturum Kimliği: {session_id}, Rol: {role}")
+        except Exception as exc:
+            st.error(f"Neo4j mesaj kaydetme hatası: {exc}")
+            print(f"Neo4j mesaj kaydetme hatası: {exc}")
 
     def close(self):
         if self.driver:
@@ -110,7 +120,6 @@ class Neo4jConnector:
                 records = [self._clean_record(record) for record in result]
                 return records
         except Exception as exc:
-            # st.error(f"Neo4j sorgu hatası (get_meyhaneler): {exc}") # Removed for pop-up reduction
             print(f"Sorgu hatası (get_meyhaneler): {exc}")
             return []
 
@@ -137,9 +146,7 @@ class Neo4jConnector:
             "price_level": price_level,
             "neo4j_element_id": neo4j_element_id,
         }
-
-# This add_messages is part of LangGraph's message history management, not a Streamlit display helper.
-# It's correctly used with Annotated[List[BaseMessage], add_messages]
+        
 def add_messages(left: List[BaseMessage], right: List[BaseMessage]) -> List[BaseMessage]:
     return left + right
 
@@ -184,7 +191,7 @@ def initialize_retriever():
         meyhaneler_listesi = conn.get_meyhaneler(limit=10000)
         conn.close()
         if not meyhaneler_listesi:
-            st.warning("Uyarı: Neo4j'den hiç mekan verisi çekilemedi. Dummy veri kullanılıyor.") # Keep this warning
+            st.warning("Uyarı: Neo4j'den hiç mekan verisi çekilemedi. Dummy veri kullanılıyor.") 
             meyhaneler_listesi = [
                 {"name": "Dummy Meyhane A", "address": "Dummy Adres A", "rating": 4.0, "review_count": 100, "map_link": "http://dummy.map.a", "phone": "000", "price_level": 2, "neo4j_element_id": "dummy-a"},
                 {"name": "Dummy Meyhane B", "address": "Dummy Adres B", "rating": 4.5, "review_count": 250, "map_link": "http://dummy.map.b", "phone": "000", "price_level": 3, "neo4j_element_id": "dummy-b"},
@@ -194,7 +201,7 @@ def initialize_retriever():
         else:
             pass
     except Exception as e:
-        st.error(f"Neo4j'den veri çekerken hata oluştu: {e}. Lütfen Neo4j sunucunuzun çalıştığından ve kimlik bilgilerinin doğru olduğundan emin olun. Dummy veri kullanılıyor.") # Keep this error
+        st.error(f"Neo4j'den veri çekerken hata oluştu: {e}. Lütfen Neo4j sunucunuzun çalıştığından ve kimlik bilgilerinin doğru olduğundan emin olun. Dummy veri kullanılıyor.") 
         meyhaneler_listesi = [
             {"name": "Dummy Meyhane A", "address": "Dummy Adres A", "rating": 4.0, "review_count": 100, "map_link": "http://dummy.map.a", "phone": "000", "price_level": 2, "neo4j_element_id": "dummy-a"},
             {"name": "Dummy Meyhane B", "address": "Dummy Adres B", "rating": 4.5, "review_count": 250, "map_link": "http://dummy.map.b", "phone": "000", "price_level": 3, "neo4j_element_id": "dummy-b"},
@@ -208,13 +215,12 @@ def initialize_retriever():
             documents=processed_docs,
             embedding=OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
         )
-        # st.success("Vektör deposu başarıyla oluşturuldu.") # Removed for pop-up reduction
+
         return vectorstore.as_retriever(search_kwargs={"k": 5})
     except Exception as e:
-        st.error(f"Vektör deposu oluşturulurken hata oluştu: {e}. OpenAI API anahtarınızı kontrol edin.") # Keep this error
+        st.error(f"Vektör deposu oluşturulurken hata oluştu: {e}. OpenAI API anahtarınızı kontrol edin.") 
         class DummyRetriever:
             def invoke(self, query, k):
-                # st.warning("Dummy retriever kullanılıyor. Gerçek arama yapılamıyor.") # Removed for pop-up reduction
                 return [Document(page_content="Dummy Mekan", metadata={"Mekan Adı": "Dummy Mekan", "Adres": "Bilinmiyor", "Google Puanı": "0.0", "Google Yorum Sayısı": "0", "Maps Linki": "", "Telefon": "", "Fiyat Seviyesi": ""})]
         return DummyRetriever()
 
@@ -247,13 +253,10 @@ def get_fun_fact() -> str:
         fact = response.json().get("text", "İlginç bir bilgi bulunamadı.")
         return fact
     except requests.exceptions.Timeout:
-        # st.error("İlginç bilgi servisi zaman aşımına uğradı.") # Removed for pop-up reduction
         return "İlginç bilgi servisi şu an çok yavaş veya çalışmıyor."
     except requests.exceptions.RequestException as e:
-        # st.error(f"İlginç bilgi servisi hatası: {e}") # Removed for pop-up reduction
         return f"İlginç bilgi servisi şu an çalışmıyor. Hata: {e}"
     except Exception as e:
-        # st.error(f"İlginç bilgi alınırken beklenmedik hata: {e}") # Removed for pop-up reduction
         return f"İlginç bilgi alınırken beklenmedik bir hata oluştu: {e}"
 
 def clean_location_query(query: str) -> str:
@@ -330,12 +333,10 @@ def get_openweather_forecast(location: str) -> Dict:
 
 def format_weather_response(location: str, data: Dict) -> str:
     if "error" in data:
-        # st.error(f"Hava durumu formatlama hatası: {data['error']}") # Removed for pop-up reduction
         return f"❌ {data['error']}"
     try:
         lines = [f"🌤️ **{location.capitalize()} Hava Durumu Tahmini:**"]
         if "list" not in data or not data["list"]:
-            # st.warning("Hava durumu verisi eksik veya boş.") # Removed for pop-up reduction
             return f"❌ {location} için hava durumu verisi bulunamadı."
 
         today = datetime.now().date()
@@ -393,13 +394,12 @@ class Tools:
                 user_query = msg.content
                 break
 
-        if not user_query: # Fallback if no HumanMessage is found (unlikely in a conversation flow)
-            user_query = messages[-1].content # Use the very last message content as fallback
+        if not user_query: 
+            user_query = messages[-1].content 
 
         clean_query = clean_location_query(user_query)
 
         retrieved_docs = self.retriever.invoke(clean_query, k=5)
-        # st.success(f"{len(retrieved_docs)} mekan bulundu.") # Removed for pop-up reduction
         
         formatted_docs = "\n".join([f"- Mekan Adı: {doc.metadata.get('Mekan Adı', 'Bilinmiyor')}, Adres: {doc.metadata.get('Adres', 'Bilinmiyor')}, Google Puanı: {doc.metadata.get('Google Puanı', '0.0')}, Yorum Sayısı: {doc.metadata.get('Google Yorum Sayısı', '0')}, Fiyat Seviyesi: {doc.metadata.get('Fiyat Seviyesi', 'Yok')}" for doc in retrieved_docs])
         tool_output_message = f"Bulunan mekanlar:\n{formatted_docs}"
@@ -407,7 +407,7 @@ class Tools:
         return {"messages": [SystemMessage(content=tool_output_message)]}
 
     def get_weather_forecast(self, state: AgentState) -> AgentState:
-        # st.info("Hava durumu aracı çağrıldı...") # Removed for pop-up reduction
+
         messages = state['messages']
         user_query = ""
         for msg in reversed(messages):
@@ -569,6 +569,7 @@ for i, msg in enumerate(st.session_state.messages):
         elif msg["role"] == "assistant":
             st.session_state.messages[i] = AIMessage(content=msg["content"])
 
+neo4j_connector = Neo4jConnector()
 
 for message in st.session_state.messages:
     display_role = "user" if isinstance(message, HumanMessage) else "assistant"
@@ -577,26 +578,29 @@ for message in st.session_state.messages:
 
 
 if prompt := st.chat_input("Nasıl yardımcı olabilirim?"):
-    # Append the new human message to session state as a HumanMessage object
-    st.session_state.messages.append(HumanMessage(content=prompt))
+    # Mevcut oturum kimliğini alın
+    if "conversation_thread_id" not in st.session_state:
+        st.session_state.conversation_thread_id = str(uuid.uuid4())
+    session_id = st.session_state.conversation_thread_id
+
+    # Yeni insan mesajını oturum durumuna ekleyin
+    user_message = HumanMessage(content=prompt)
+    st.session_state.messages.append(user_message)
+
+    # Kullanıcı mesajını Neo4j'ye kaydedin
+    neo4j_connector.save_chat_message(session_id, "user", prompt, datetime.now())
+
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.spinner("Yanıt oluşturuluyor..."):
         app = create_workflow()
-        
 
-        if "conversation_thread_id" not in st.session_state:
-            st.session_state.conversation_thread_id = str(uuid.uuid4())
-            
-        
-        config = {"configurable": {"thread_id": st.session_state.conversation_thread_id}}
+        config = {"configurable": {"thread_id": session_id}}
 
-        # response_placeholder = st.empty() # Not strictly necessary if we display content at the end
         latest_ai_message_content = ""
 
         try:
-            # Pass the entire conversation history from session_state.messages to the LangGraph stream
             for s in app.stream({"messages": st.session_state.messages}, config=config):
                 for key in s:
                     node_output = s[key]
@@ -604,31 +608,35 @@ if prompt := st.chat_input("Nasıl yardımcı olabilirim?"):
                         for msg in reversed(node_output["messages"]):
                             if isinstance(msg, AIMessage) and msg.content:
                                 latest_ai_message_content = msg.content
-                                break # Found the latest AI message in this node's output, move to next node's output
+                                break
 
-
-            # After the stream completes, use the latest_ai_message_content found
             if latest_ai_message_content:
                 sanitized_content = sanitize_markdown(latest_ai_message_content)
-                # Append the AI message to session state as an AIMessage object
-                st.session_state.messages.append(AIMessage(content=sanitized_content))
-                # st.success("Asistan yanıtı başarıyla eklendi.") # Removed for pop-up reduction
-                
+                ai_message = AIMessage(content=sanitized_content)
+                st.session_state.messages.append(ai_message)
+
+                # Yapay zeka mesajını Neo4j'ye kaydedin
+                neo4j_connector.save_chat_message(session_id, "assistant", sanitized_content, datetime.now())
+
                 with st.chat_message("assistant"):
                     st.markdown(sanitized_content, unsafe_allow_html=True)
             else:
-                error_msg = "Üzgünüm, bir yanıt üretemedim. LangGraph akışı tamamlandı ancak AI mesajı bulunamadı. Lütfen tekrar deneyin."
-                st.session_state.messages.append(AIMessage(content=error_msg)) # Store as AIMessage
+                error_msg = "Üzgünüm, bir yanıt üretemedim. LangGraph akışı tamamlandı ancak yapay zeka mesajı bulunamadı. Lütfen tekrar deneyin."
+                ai_error_message = AIMessage(content=error_msg)
+                st.session_state.messages.append(ai_error_message)
+                neo4j_connector.save_chat_message(session_id, "assistant", error_msg, datetime.now()) # Hata mesajını günlüğe kaydedin
                 with st.chat_message("assistant"):
                     st.markdown(error_msg)
-                st.error("LangGraph akışı AI mesajı üretmeden tamamlandı.") # Keep this error as it's a critical state
+                st.error("LangGraph akışı yapay zeka mesajı üretmeden tamamlandı.")
 
         except Exception as e:
             error_message = f"Bir hata oluştu: {e}. Lütfen daha sonra tekrar deneyin."
-            st.error(f"Ana döngüde beklenmedik hata: {str(e)}") # Keep this error
+            st.error(f"Ana döngüde beklenmedik hata: {str(e)}")
             print(f"ERROR in main loop: {str(e)}")
-            st.session_state.messages.append(AIMessage(content=error_message)) # Store as AIMessage
+            ai_error_message = AIMessage(content=error_message)
+            st.session_state.messages.append(ai_error_message)
+            neo4j_connector.save_chat_message(session_id, "assistant", error_message, datetime.now()) # Hata mesajını günlüğe kaydedin
             with st.chat_message("assistant"):
                 st.markdown(error_message)
-                st.exception(e)   # Keep this exception for debugging
-    st.rerun() # Rerun the app to show the latest message
+                st.exception(e)
+    st.rerun()
